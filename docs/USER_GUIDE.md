@@ -1,7 +1,8 @@
 # User guide
 
 Everything you can change lives in the **Control Centre**. This guide goes through it page by page. If you would
-rather follow a task from start to finish, see [TUTORIALS.md](TUTORIALS.md).
+rather follow a task from start to finish, see [TUTORIALS.md](TUTORIALS.md). For a complete overview of the shell (popups, media,
+icons, lock, boot, your own art, limits) see [FEATURES.md](FEATURES.md).
 
 ## Opening it, moving around
 

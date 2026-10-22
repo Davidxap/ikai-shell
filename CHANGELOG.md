@@ -9,6 +9,9 @@ presets and saved setups, the Health page and `ito-compat`. Requires Omarchy 4.0
 
 ## Development log (before the first release)
 
+### Full tour (2026-10-22)
+- `docs/FEATURES.md`: a complete, code-checked tour of IKAI (popups and frames, media, icons, lock, boot, your own art, limits), with a frames screenshot.
+
 ### Pyramid, neutral names, Tomie Classic (2026-10-22)
 - Pyramid Head menu mark and the `pyramid` workspace family are cut from your side view with its own lighting and true deep blacks (no grey lift, no engraving), written in theme tokens so they follow the current theme: shadows in the theme's darkest colour, light in its foreground, blood in its accent. Empty is dimmed, occupied scratched, active a blood ring with a glow and runs, urgent a stronger glow. Re-run `ito-assets recipe pyramid-head FILE`.
 - Neutral names: icon styles **Ink** (was Manga) and **Relic** (was Gothic), the sprite skins **Hollow** (was Silent Hill); frame style **Panel**, seal **Quiet hill**, surfaces **Print paper / Print page**, preset **Fog town**, fetch style **Rust**. Stored ids are unchanged; `ink`, `relic` and `hollow` are accepted as values.

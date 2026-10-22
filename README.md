@@ -101,6 +101,8 @@ The longer story, the migration note and the credits are in [docs/ABOUT.md](docs
 
 ## Popups and their emblems
 
+Full tour of every feature: [docs/FEATURES.md](docs/FEATURES.md).
+
 Each popup carries a small drawn sign at its head, in the theme's colours, for what it watches.
 
 > The popup screenshots below were taken on the **Blackturq** theme, which is why they are teal (the calendar, on **Nord**, is blue). The shell wears whichever
@@ -224,6 +226,7 @@ To undo everything IKAI changed (`ito-config reset`, `ito-lock revert`, `ito-fas
 
 | | |
 |---|---|
+| [docs/FEATURES.md](docs/FEATURES.md) | **Full tour**: what IKAI is and every feature: popups and frames, media, icons, lock, boot, your own art, limits |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | Every page of the Control Centre, control by control |
 | [docs/TUTORIALS.md](docs/TUTORIALS.md) | Step by step: make it yours, your own pictures and GIFs, move widgets, add a plugin, save a setup, switch shells, get help |
 | [docs/ANIMATIONS.md](docs/ANIMATIONS.md) | Every hover gesture, popup emblem and media effect, and the icons that were redrawn |
