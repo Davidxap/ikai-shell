@@ -1,5 +1,6 @@
 import QtQuick 6.11
 import "ItoFrameStyles.js" as Styles
+import "ItoEmblemMap.js" as EmblemMap
 
 // A popup drawn as a manga panel: ink, a ruled frame with a second thin rule inside it, torn corners, a
 // spatter of blood in one corner and a screentone patch in another, and a faint mist along the bottom.
@@ -176,7 +177,9 @@ Item {
   onAlertChanged: if (alert && opened && amp > 0 && on && styleKey === "otherworld") flash.restart()
   onMemoChanged: if (memos.length === 0) shownMemo = memo
 
-  readonly property bool realEye: !!cfg && (cfg.eyeFamily !== undefined ? cfg.eyeFamily : cfg.eyeStyle) === "shaded"
+  // the emblem is the widget's current icon (ItoEmblemMap); "" for one with no bar icon (the clock), which keeps its drawn sign
+  readonly property string emblemArt: cfg ? EmblemMap.art(emblem, cfg.get("aiStyle", "brain")) : ""
+  readonly property bool realEye: emblem === "eye" && emblemArt === "" && !!cfg && (cfg.eyeFamily !== undefined ? cfg.eyeFamily : cfg.eyeStyle) === "shaded"
   // where the pointer is, in the emblem's coordinates (null when it is not over the head of the popup or the card): the real eye follows it. Only a moving
   // real eye asks (eyes-animation.md): for every other emblem and style this is null and nothing is mapped.
   readonly property var crestPointer: {
@@ -256,13 +259,13 @@ Item {
     transform: Scale {
       origin.x: eye.width / 2
       origin.y: eye.height / 2
-      yScale: (eye.awake || root.emblem !== "eye" || root.realEye) ? 1 : 0.86
+      yScale: (eye.awake || root.emblem !== "eye" || root.emblemArt !== "" || root.realEye) ? 1 : 0.86
       Behavior on yScale { NumberAnimation { duration: 200 * Math.min(root.amp, 1); easing.type: Easing.OutCubic } }
     }
     // Drawn as vector curves, so it stays sharp and takes the theme's colours.
     ItoCrest {
       anchors.fill: parent
-      kind: root.emblem
+      kind: root.emblemArt !== "" ? "rules" : root.emblem
       live: root.opened
       amp: root.amp
       bone: root.bone
@@ -275,6 +278,15 @@ Item {
       crestEye: root.cfg && root.cfg.crestEye !== undefined ? root.cfg.crestEye : "auto"
       eyeLevel: root.cfg && root.cfg.eyeLevel !== undefined ? root.cfg.eyeLevel : 0
       pointer: root.crestPointer
+    }
+    // the widget's CURRENT icon (same picture and style as the bar), over the rules
+    ItoImage {
+      visible: root.emblemArt !== ""
+      anchors.centerIn: parent
+      width: 34; height: 34
+      palette: root.cfg
+      source: root.emblemArt !== "" ? root.artBase + root.emblemArt : ""
+      level: EmblemMap.isLevel(root.emblem) ? 0.6 : -1
     }
   }
 

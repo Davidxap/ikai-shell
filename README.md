@@ -103,7 +103,7 @@ The longer story, the migration note and the credits are in [docs/ABOUT.md](docs
 
 Full tour of every feature: [docs/FEATURES.md](docs/FEATURES.md).
 
-Each popup carries a small drawn sign at its head, in the theme's colours, for what it watches.
+Each popup carries a small sign at its head, in the theme's colours: the widget's current icon, the same drawing and style the bar uses (Original, Ink or Relic, per widget), so the Display popup shows the current display icon. The calendar keeps its drawn clock.
 
 > The popup screenshots below were taken on the **Blackturq** theme, which is why they are teal (the calendar, on **Nord**, is blue). The shell wears whichever
 > Omarchy theme is installed, so the same popups turn blue on Nord, pink on Banish, and so on: the accent is the theme's, the

@@ -9,6 +9,10 @@ presets and saved setups, the Health page and `ito-compat`. Requires Omarchy 4.0
 
 ## Development log (before the first release)
 
+### Popup emblems follow the current icons (2026-10-22)
+
+The emblem at the head of every popup is now the widget's current bar icon (`ItoEmblemMap.js`, drawn by `ItoImage` in the style chosen for that widget), not an older drawing; the clock keeps its drawn sign. Doc shots `popup-emblems`, `popup-player`, `popup-forecast` re-rendered.
+
 ### Full tour (2026-10-22)
 - `docs/FEATURES.md`: a complete, code-checked tour of IKAI (popups and frames, media, icons, lock, boot, your own art, limits), with a frames screenshot.
 

@@ -129,7 +129,7 @@ makes every opening instant (`motion`: off, calm, lively; `motionScope`: `ito` o
 pictures) moved by `eyeMotion` (subtle, full; see Styles). `vesselFill` sets what fills the memory vessel: blood, whirlpool, hair,
 rust, static, tone. `loreLevel` (off, subtle, full) adds small notes that follow the machine's state.
 
-**Content per popup** (emblem in brackets):
+**Content per popup** (emblem in brackets; each emblem is the widget's current bar icon, in the style chosen for it, `ItoEmblemMap.js`; the calendar clock is drawn):
 
 | Popup | Contents |
 |---|---|
