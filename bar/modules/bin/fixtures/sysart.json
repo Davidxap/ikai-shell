@@ -1,0 +1,21 @@
+{
+  "note": "Sample data for the Boot & Lock previews: nothing here is read from the machine.",
+  "host": "Sample Workstation 01",
+  "cpu": "Sample CPU 8-core @ 4.20 GHz",
+  "gpu": "Sample GPU 16 GB",
+  "display": "2560x1440 in 27\", 144 Hz",
+  "disk": "120.4 GiB / 931.5 GiB (13%) - btrfs",
+  "memory": "9.2 GiB / 31.3 GiB (29%)",
+  "swap": "0 B / 8.0 GiB (0%)",
+  "os": "Omarchy 4.0",
+  "kernel": "Linux 7.0.0-sample",
+  "wm": "Hyprland 0.56 (Wayland)",
+  "de": "Omarchy Shell",
+  "terminal": "ghostty",
+  "packages": "1200 (pacman)",
+  "wmtheme": "sample-theme",
+  "terminalfont": "JetBrainsMono Nerd Font (11pt)",
+  "commands": {"version": "Omarchy 4.0", "branch": "stable", "channel": "stable", "theme": "sample-theme ●●●●●●●●",
+              "age": "120 days", "uptime": "3 hours, 2 mins", "update": "2 days ago"},
+  "lock": {"time": "23:47", "time12": "11:47 pm", "date": "tuesday · 29 september", "status": "up 3h 2m · bat 80% · locked 0:42"}
+}

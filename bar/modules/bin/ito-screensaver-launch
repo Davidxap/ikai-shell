@@ -1,0 +1,99 @@
+#!/bin/bash
+
+# ito-screensaver-launch: a line-for-line port of Omarchy's omarchy-launch-screensaver (same terminal cases, the same
+# --class=org.omarchy.screensaver so Omarchy's window rules still apply, the same monitor loop and socket wait). The ONE change:
+# the terminal runs `ito-screensaver run` (effects coloured from the theme) instead of `omarchy-screensaver`.
+# Regenerate with: scripts/sync-ito-screensaver-launch.sh. Honours screensaver-off unless called with `force`.
+ITO_RUN="${ITO_RUN:-$HOME/.config/omarchy/bar/modules/bin/ito-screensaver}"
+# A lab run sets ITO_SCREENSAVER_CLASS=ito.screensaver.lab so it never matches, nor is matched by, the real screensaver's class.
+CLASS="${ITO_SCREENSAVER_CLASS:-org.omarchy.screensaver}"
+RUNNER=("$ITO_RUN" run)
+# Hyprland's exec does not pass this script's environment on, so a lab class travels on the command line.
+[[ $CLASS != org.omarchy.screensaver ]] && RUNNER=(env "ITO_SCREENSAVER_CLASS=$CLASS" "$ITO_RUN" run)
+
+
+if omarchy-cmd-missing ttfx; then
+  exit 1
+fi
+
+# Exit early if screensaver is already running
+pgrep -f "[${CLASS:0:1}]${CLASS:1}" && exit 0
+
+# Allow screensaver to be turned off but also force started
+if omarchy-toggle-enabled screensaver-off && [[ $1 != "force" ]]; then
+  exit 1
+fi
+
+focused=$(omarchy-hyprland-monitor-focused)
+terminal=$(xdg-terminal-exec --print-id)
+
+case $terminal in
+*Alacritty* | *ghostty* | *foot* | *kitty*) ;;
+*)
+  omarchy-notification-send -g ✋ "Screensaver only runs in Alacritty, Foot, Ghostty, or Kitty"
+  exit 1
+  ;;
+esac
+
+hypr_focus_monitor() {
+  hyprctl dispatch "hl.dsp.focus({ monitor = \"$1\" })" >/dev/null 2>&1 || hyprctl dispatch focusmonitor "$1" >/dev/null
+}
+
+hypr_exec() {
+  local command
+  printf -v command '%q ' "$@"
+
+  hyprctl dispatch "hl.dsp.exec_cmd([[$command]])" >/dev/null 2>&1 || hyprctl dispatch exec -- bash -lc "$command" >/dev/null
+}
+
+SOCKET="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
+
+# Open Hyprland's event stream before spawning anything, so a terminal that maps
+# quickly can't emit its openwindow event before we are listening for it.
+exec {events}< <(socat -U - "UNIX-CONNECT:$SOCKET")
+
+# hypr_exec is async and a new window maps on whatever monitor is focused at that
+# moment. Block until this monitor's screensaver actually opens before moving
+# focus on -- otherwise slow-starting terminals all pile onto the last monitor.
+# The deadline is a safety net in case the window never appears.
+wait_for_screensaver_window() {
+  local line deadline=$((SECONDS + 5))
+  while ((SECONDS < deadline)) && IFS= read -r -t $((deadline - SECONDS)) -u "$events" line; do
+    [[ $line == openwindow\>\>*,$CLASS,* ]] && { opened=${line#openwindow>>}; opened=0x${opened%%,*}; return 0; }
+  done
+}
+# ito-fullscreen-begin: the window rule asks for fullscreen, but a floating terminal can keep its own size; make sure each screensaver
+# window covers its monitor (a dispatch on the window that just opened, nothing else).
+ensure_fullscreen() {
+  [[ -n ${opened:-} ]] || return 0
+  sleep 0.25
+  [[ $(hyprctl clients -j | jq -r --arg a "$opened" '.[] | select(.address == $a) | .fullscreen' 2>/dev/null) == 2 ]] && return 0
+  hyprctl dispatch "hl.dsp.window.fullscreen({ window = \"address:$opened\", mode = \"fullscreen\", action = \"set\" })" >/dev/null 2>&1 ||
+    hyprctl dispatch fullscreenstate "2 2,address:$opened" >/dev/null 2>&1
+}
+# ito-fullscreen-end
+
+for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
+  hypr_focus_monitor "$m"
+
+  case $terminal in
+  *Alacritty*)
+    hypr_exec alacritty --class=$CLASS --config-file "$OMARCHY_PATH/default/alacritty/screensaver.toml" -e "${RUNNER[@]}"
+    ;;
+  *ghostty*)
+    hypr_exec ghostty --class=$CLASS --config-file="$OMARCHY_PATH/default/ghostty/screensaver" --font-size=18 -e "${RUNNER[@]}"
+    ;;
+  *foot*)
+    hypr_exec foot --app-id=$CLASS --config="$OMARCHY_PATH/default/foot/screensaver.ini" -e "${RUNNER[@]}"
+    ;;
+  *kitty*)
+    hypr_exec kitty --class=$CLASS --override font_size=18 --override window_padding_width=0 -e "${RUNNER[@]}"
+    ;;
+  esac
+
+  opened=
+  wait_for_screensaver_window
+  ensure_fullscreen
+done
+
+hypr_focus_monitor "$focused"

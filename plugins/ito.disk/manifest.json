@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.disk",
+  "name": "Ito Disk",
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "davidxap",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Disk usage; the glyph heats with use.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Disk",
+    "description": "Disk usage; the glyph heats with use.",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

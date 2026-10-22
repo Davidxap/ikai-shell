@@ -1,0 +1,40 @@
+{
+ "hex": {
+  "plugins/ito.bar/styles/itoverse/VisualTokens.qml": 5,
+  "bar/modules/ItoConfig.qml": 5,
+  "bar/modules/ItoCoreSeal.qml": 2,
+  "bar/modules/ItoDrip.qml": 1,
+  "bar/modules/ItoEyeGlyph.qml": 1,
+  "bar/modules/ItoFillArt.qml": 1,
+  "bar/modules/ItoFlauros.qml": 2,
+  "bar/modules/ItoFx.qml": 1,
+  "bar/modules/ItoGauge.qml": 2,
+  "bar/modules/ItoGlow.qml": 1,
+  "bar/modules/ItoGlyph.qml": 4,
+  "bar/modules/ItoGroove.qml": 4,
+  "bar/modules/ItoIchor.qml": 1,
+  "bar/modules/ItoLevelArt.qml": 1,
+  "bar/modules/ItoMediaFx.qml": 2,
+  "bar/modules/ItoMountRow.qml": 1,
+  "bar/modules/ItoPanelPalette.qml": 4,
+  "bar/modules/ItoPlatterSeal.qml": 2,
+  "bar/modules/ItoSealInk.qml": 4,
+  "bar/modules/ItoSkyFx.qml": 2,
+  "bar/modules/ItoSwapSeal.qml": 6,
+  "bar/modules/ItoVein.qml": 1,
+  "bar/modules/ItoVesselBlock.qml": 1,
+  "bar/modules/ItoVesselSeal.qml": 13
+ },
+ "durations": 107,
+ "clocks": [
+  "bar/modules/ItoAutoClose.qml",
+  "bar/modules/ItoCrest.qml",
+  "bar/modules/ItoFx.qml",
+  "bar/modules/ItoHover.qml",
+  "bar/modules/ItoMediaFx.qml",
+  "bar/modules/ItoSkyFx.qml"
+ ],
+ "onNames": [
+  "plugins/ito.power/Panel.qml:onBatteryPhrases"
+ ]
+}

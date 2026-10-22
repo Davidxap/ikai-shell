@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.media",
+  "name": "Ito Media",
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "davidxap",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Previous, play or pause, and next for whatever is playing, drawn as the sheet's rings.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Media",
+    "description": "Previous, play or pause, and next for whatever is playing, drawn as the sheet's rings.",
+    "category": "Media",
+    "allowMultiple": false
+  }
+}

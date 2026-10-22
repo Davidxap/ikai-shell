@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.power",
+  "name": "Ito Battery",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author": "Omarchy (re-skinned by davidxap)",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Battery, power profile, and system stats",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Battery",
+    "description": "Battery, power profile, and system stats",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

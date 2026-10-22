@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""ito-profile — save the bar as you made it, and come back to it.
+
+Everything you change is remembered by itself. A profile is a named copy of that state, so you can try another
+look and return, move to another machine, or recover after something went wrong.
+
+    ito-profile list                 JSON: the saved setups
+    ito-profile save NAME            store the look (colours, effects, widgets and their places, marks, your pictures)
+    ito-profile load NAME [--only look|layout]
+                                     put it back (the shell restarts for a few seconds). `--only look` brings back just the
+                                     colours, effects, marks and pictures and leaves the bar's shape and widgets as they are;
+                                     `--only layout` brings back just the shape, position and widgets and leaves the look.
+    ito-profile delete NAME
+
+A profile lives in ~/.config/ito/profiles/NAME/ as plain files:
+    style.json     the look: ito-style.json
+                   Loading a look never touches the five system-surface keys (lockTheme, idleScreensaver,
+                   fastfetchTheme, lockDesign, fastfetchLayout): they mirror real files (lock screen, hypridle,
+                   fastfetch), so a profile must not flip those toggles; the current values are kept.
+    bar.json       the bar: its shape and where every widget sits, and the state that goes with it
+    marks/         your menu marks, seal picture, decoration and workspace pictures
+    effects/       your own media effect
+"""
+
+from __future__ import annotations
+
+import fcntl
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path.home()
+OMARCHY = HOME / ".config" / "omarchy"
+STYLE = OMARCHY / "bar" / "modules" / "ito-style.json"
+SHELL_JSON = OMARCHY / "shell.json"
+ITO = HOME / ".config" / "ito"
+PROFILES = ITO / "profiles"
+STATE_IDS = ("ito.state", "hancore.shibumi.state")
+# Mirror real system files, so loading a profile keeps the current values (see the header).
+SYSTEM_KEYS = ("lockTheme", "idleScreensaver", "fastfetchTheme", "lockDesign", "fastfetchLayout")
+
+# Drawing options added after the first profiles were saved (icons, eyes): a profile without them keeps the current value.
+DRAWING_KEYS = ("iconStyle", "iconTone", "iconStyleOverrides", "iconOmens", "eyeStyle", "eyeMotion", "crestEye",
+                "vesselFill", "aiStyle", "trayFace", "fetchLogo")
+DRAWING_PREFIXES = ("iconStyle:",)
+
+_here = Path(__file__).resolve().parent
+
+
+def design():
+    loader = importlib.machinery.SourceFileLoader("ito_design", str(_here / "ito-design"))
+    spec = importlib.util.spec_from_loader("ito_design", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def clean(name: str) -> str:
+    name = re.sub(r"[^\w .-]", "", name).strip().strip(".")
+    if not name:
+        sys.exit("ito-profile: give the setup a name")
+    return name[:48]
+
+
+def write_json(path: Path, data) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=1))
+    os.replace(tmp, path)
+
+
+def read_shell_json() -> dict:
+    """The live shell config, or a clear message: on a machine that has not run Omarchy's shell yet there is none."""
+    try:
+        return json.loads(SHELL_JSON.read_text())
+    except (OSError, ValueError):
+        sys.exit(f"ito-profile: {SHELL_JSON} is missing or unreadable; start the shell once (scripts/deploy.sh) and try again")
+
+
+def load_style(src: Path) -> None:
+    """Replace the sidecar with the profile's look, keeping the current system-surface keys. Holds the same lock as
+    ito-config so a concurrent `ito-config set` is not lost."""
+    with open(str(STYLE) + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            current = json.loads(STYLE.read_text()) or {}
+        except (OSError, ValueError):
+            current = {}
+        try:
+            data = json.loads((src / "style.json").read_text()) or {}
+        except (OSError, ValueError):
+            sys.exit(f"ito-profile: the setup {src.name} is damaged (style.json is unreadable)")
+        for k in SYSTEM_KEYS:
+            data.pop(k, None)
+            if k in current:
+                data[k] = current[k]
+        # A setup saved before a drawing option existed says nothing about it: loading it must not silently reset
+        # that option (it used to switch the manga icons back to the old ones). Only what the profile itself holds
+        # wins; everything else of this kind keeps its current value.
+        for k, v in current.items():
+            if k not in data and (k in DRAWING_KEYS or k.startswith(DRAWING_PREFIXES)):
+                data[k] = v
+        # S14: a setup saved before the rename carries the old names (same table as `ito-config migrate`)
+        for k in ("vesselEyes", "vesselLayout"):
+            data.pop(k, None)
+        if data.get("eyeStyle") in ("real", "ink", "gekiga"):
+            data["eyeStyle"] = "shaded"
+        for k in ("fxMark", "fxSeal", "fxVeins"):
+            if data.get(k) in ("pulse", "glitch"):
+                data[k] = "breathe" if data[k] == "pulse" else "tear"
+        if data.get("mediaFx") == "eyes":
+            data["mediaFx"] = "blood"
+        write_json(STYLE, data)
+
+
+def cmd_list() -> int:
+    out = []
+    if PROFILES.is_dir():
+        for d in sorted(PROFILES.iterdir(), key=lambda p: -p.stat().st_mtime):
+            if (d / "style.json").exists():
+                out.append({"name": d.name, "saved": time.strftime("%Y-%m-%d %H:%M", time.localtime(d.stat().st_mtime))})
+    json.dump(out, sys.stdout)
+    return 0
+
+
+def cmd_save(name: str) -> int:
+    name = clean(name)
+    dest = PROFILES / name
+    tmp = PROFILES / (name + ".saving")
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    shutil.copy(STYLE, tmp / "style.json") if STYLE.exists() else write_json(tmp / "style.json", {})
+    cfg = read_shell_json()
+    states = [e for e in cfg.get("plugins", []) if isinstance(e, dict) and e.get("id") in STATE_IDS]
+    write_json(tmp / "bar.json", {"bar": cfg.get("bar", {}), "states": states})
+    for sub in ("marks", "effects"):
+        if (ITO / sub).is_dir():
+            shutil.copytree(ITO / sub, tmp / sub)
+    shutil.rmtree(dest, ignore_errors=True)
+    os.replace(tmp, dest)
+    print(json.dumps({"saved": name}))
+    return 0
+
+
+def cmd_load(name: str, only: str = "") -> int:
+    """Put a setup back. A setup holds two things, and either can be brought back alone: the look (style.json, marks,
+    effects) and the layout (the bar's edge, shape and widgets). Loading both used to be the only choice, which changed
+    everything on the bar at once even when only the colours were wanted."""
+    src = PROFILES / clean(name)
+    if not (src / "style.json").exists():
+        sys.exit(f"ito-profile: no setup called {name}")
+    want_look = only in ("", "look")
+    want_layout = only in ("", "layout")
+    bar = None
+    if want_layout:
+        try:
+            bar = json.loads((src / "bar.json").read_text())
+        except (OSError, ValueError):
+            sys.exit(f"ito-profile: the setup {src.name} is damaged (bar.json is missing or unreadable)")
+    d = design()
+    if want_layout:
+        d.stop_shell()                                   # the layout is written everywhere at once, so the shell stops first
+    if want_look:
+        load_style(src)
+        for sub in ("marks", "effects"):
+            if (src / sub).is_dir():
+                (ITO / sub).mkdir(parents=True, exist_ok=True)
+                for f in (src / sub).iterdir():
+                    if f.is_file():
+                        shutil.copy(f, ITO / sub / f.name)
+        shutil.rmtree(HOME / ".cache" / "ito" / "marks", ignore_errors=True)   # rebuilt from the originals on first sight
+        marks = Path(__file__).resolve().parent / "ito-marks"
+        if marks.exists():
+            subprocess.run([str(marks), "list"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    if want_layout:
+        cfg = read_shell_json()
+        cfg["bar"] = bar["bar"]
+        plugins = [e for e in cfg.get("plugins", []) if not (isinstance(e, dict) and e.get("id") in STATE_IDS)]
+        cfg["plugins"] = plugins + bar.get("states", [])
+        write_json(SHELL_JSON, cfg)
+        d.start_shell()
+    print(json.dumps({"loaded": src.name, "only": only or "everything"}))
+    return 0
+
+
+def cmd_delete(name: str) -> int:
+    shutil.rmtree(PROFILES / clean(name), ignore_errors=True)
+    return 0
+
+
+def main() -> int:
+    a = sys.argv[1:]
+    if not a:
+        print(__doc__)
+        return 2
+    if a[0] == "list":
+        return cmd_list()
+    if a[0] == "save" and len(a) > 1:
+        return cmd_save(" ".join(a[1:]))
+    if a[0] == "load" and len(a) > 1:
+        rest, only = a[1:], ""
+        if "--only" in rest:
+            k = rest.index("--only")
+            only = rest[k + 1] if k + 1 < len(rest) else ""
+            rest = rest[:k] + rest[k + 2:]
+            if only not in ("look", "layout"):
+                sys.exit("ito-profile: --only takes look or layout")
+        return cmd_load(" ".join(rest), only)
+    if a[0] == "delete" and len(a) > 1:
+        return cmd_delete(" ".join(a[1:]))
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

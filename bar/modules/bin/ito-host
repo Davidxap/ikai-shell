@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# ito-host — the few things the shell asks of the desktop it runs on, in one place.
+#
+# The widgets never call a distribution's own tools (omarchy-*, a particular terminal, a particular compositor);
+# they call this, and this uses whatever the machine has. Add a case here and every widget works on a new host.
+#
+#   ito-host menu                 open the application menu
+#   ito-host tui COMMAND          run a terminal program (btop…), focusing it if it is already open
+#   ito-host workspace N          go to workspace N
+#   ito-host record               start or stop a screen recording
+#   ito-host nightlight [status|toggle]   the warm screen: print on or off, or flip it
+#   ito-host awake [status|toggle]        keep the machine from idling (lock, screensaver, sleep): print on or off, or flip it
+#   ito-host dnd [status|toggle]          Do Not Disturb for notifications: print on or off, or flip it
+#   ito-host which                print what was detected: compositor, terminal, launcher
+set -u
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+compositor() {
+  if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && have hyprctl; then echo hyprland
+  elif [[ -n "${SWAYSOCK:-}" ]] && have swaymsg; then echo sway
+  elif [[ -n "${NIRI_SOCKET:-}" ]] && have niri; then echo niri
+  else echo unknown; fi
+}
+
+terminal() {
+  for t in "${TERMINAL:-}" xdg-terminal-exec ghostty kitty alacritty foot wezterm konsole gnome-terminal xterm; do
+    [[ -n "$t" ]] && have "$t" && { echo "$t"; return; }
+  done
+}
+
+launcher() {
+  for l in fuzzel wofi rofi tofi bemenu-run; do have "$l" && { echo "$l"; return; }; done
+}
+
+case "${1:-}" in
+  menu)
+    if have omarchy-shell; then
+      # Omarchy's menu is the first-party omarchy.menu plugin. It is only loaded while it has an entry in the bar layout;
+      # ito.bar lists it among its consumed aliases (core/GroupRegistry.js), so that entry draws no second button.
+      # If the entry is missing (fresh seed, layout rewritten) put it back once with Omarchy's own command, then ask for the menu.
+      # Any failure falls through to the launcher.
+      if have omarchy && have jq; then
+        omarchy plugin list --json 2>/dev/null | jq -e '.[] | select(.id=="omarchy.menu" and .enabled==true)' >/dev/null 2>&1 \
+          || { omarchy plugin enable omarchy.menu >/dev/null 2>&1; sleep 1; }
+      fi
+      omarchy-shell shell toggle omarchy.menu '{"menu":"root"}' >/dev/null 2>&1 && exit 0
+    fi
+    case "$(launcher)" in
+      fuzzel) exec fuzzel ;;
+      wofi) exec wofi --show drun ;;
+      rofi) exec rofi -show drun ;;
+      tofi) exec tofi-drun ;;
+      bemenu-run) exec bemenu-run ;;
+      *) have notify-send && notify-send "IKAI" "No application launcher found (install fuzzel, wofi or rofi)." ;;
+    esac ;;
+  tui)
+    shift
+    [[ $# -gt 0 ]] || exit 2
+    if have omarchy-launch-or-focus-tui; then exec omarchy-launch-or-focus-tui "$@"; fi
+    t="$(terminal)"
+    [[ -n "$t" ]] || { have notify-send && notify-send "IKAI" "No terminal found to run $*."; exit 1; }
+    case "$t" in
+      xdg-terminal-exec) exec xdg-terminal-exec "$@" ;;
+      gnome-terminal) exec gnome-terminal -- "$@" ;;
+      *) exec "$t" -e "$@" ;;
+    esac ;;
+  workspace)
+    n="${2:?workspace number}"
+    case "$(compositor)" in
+      hyprland)
+        # Omarchy's Hyprland is configured through Lua; a stock one takes the classic dispatcher
+        hyprctl dispatch "hl.dsp.focus({ workspace = \"$n\" })" >/dev/null 2>&1 \
+          || hyprctl dispatch workspace "$n" >/dev/null 2>&1 ;;
+      sway) exec swaymsg workspace number "$n" ;;
+      niri) exec niri msg action focus-workspace "$n" ;;
+    esac ;;
+  record)
+    if have omarchy-capture-screenrecording; then
+      if pgrep -f '^gpu-screen-recorder' >/dev/null; then exec omarchy-capture-screenrecording --stop-recording; fi
+      exec omarchy-menu toggle trigger.capture.screenrecord
+    fi
+    if pgrep -x wf-recorder >/dev/null; then exec pkill -INT -x wf-recorder; fi
+    if pgrep -f '^gpu-screen-recorder' >/dev/null; then exec pkill -INT -f '^gpu-screen-recorder'; fi
+    if have wf-recorder; then exec wf-recorder -f "$HOME/Videos/recording-$(date +%F-%H%M%S).mp4"; fi
+    have notify-send && notify-send "IKAI" "No screen recorder found (install wf-recorder or gpu-screen-recorder)." ;;
+  nightlight)
+    # hyprsunset is what does it (Omarchy's toggle drives the same one). Below 6000 K counts as night light.
+    temp() { hyprctl hyprsunset temperature 2>/dev/null | grep -Eo '[0-9]+' | head -1; }
+    case "${2:-status}" in
+      status)
+        t="$(temp)"
+        if [[ -n "$t" && "$t" -lt 6000 ]]; then echo on; else echo off; fi ;;
+      toggle)
+        if have omarchy-toggle-nightlight; then exec omarchy-toggle-nightlight; fi
+        have hyprsunset || { have notify-send && notify-send "IKAI" "Night light needs hyprsunset."; exit 1; }
+        if ! pgrep -x hyprsunset >/dev/null; then
+          setsid hyprsunset >/dev/null 2>&1 &
+          for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.5; [[ -n "$(temp)" ]] && break; done   # it registers a moment after it starts
+        fi
+        t="$(temp)"
+        if [[ -n "$t" && "$t" -lt 6000 ]]; then hyprctl hyprsunset temperature 6500 >/dev/null; else hyprctl hyprsunset temperature 4000 >/dev/null; fi ;;
+    esac ;;
+  awake)
+    # Omarchy keeps 'stay awake' as a flag file and flips it with omarchy-toggle-idle. The widget used to ask
+    # the shell's own idle service instead, which is only handed to a plugin when the host has that service
+    # enabled -- the same failure Night Light had. Reading the flag itself cannot go missing that way.
+    flag="$HOME/.local/state/omarchy/indicators/stay-awake"
+    ours="${XDG_RUNTIME_DIR:-/tmp}/ito-stay-awake.pid"
+    is_on() {
+      if have omarchy-toggle-idle; then [[ -f $flag ]]
+      else [[ -f $ours ]] && kill -0 "$(cat "$ours" 2>/dev/null)" 2>/dev/null; fi
+    }
+    case "${2:-status}" in
+      status) if is_on; then echo on; else echo off; fi ;;
+      toggle)
+        if have omarchy-toggle-idle; then exec omarchy-toggle-idle toggle; fi
+        if is_on; then kill "$(cat "$ours")" 2>/dev/null; rm -f "$ours"; exit 0; fi
+        have systemd-inhibit || { have notify-send && notify-send "IKAI" "Stay awake needs systemd-inhibit."; exit 1; }
+        setsid systemd-inhibit --what=idle --who="IKAI" --why="Stay awake" sleep infinity >/dev/null 2>&1 &
+        echo $! > "$ours" ;;
+    esac ;;
+  dnd)
+    # Do Not Disturb. Omarchy's notification server lives inside the shell and answers over IPC; elsewhere it
+    # is whichever daemon is running (mako, dunst).
+    case "${2:-status}" in
+      status)
+        if have omarchy-shell && s="$(timeout 3 omarchy-shell notifications isDnd 2>/dev/null)" && [[ -n $s ]]; then echo "$s"
+        elif have makoctl && makoctl mode >/dev/null 2>&1; then
+          if makoctl mode | grep -qx 'do-not-disturb'; then echo on; else echo off; fi
+        elif have dunstctl; then
+          if [[ "$(dunstctl is-paused 2>/dev/null)" == true ]]; then echo on; else echo off; fi
+        else echo off; fi ;;
+      toggle)
+        if have omarchy-toggle-notification-silencing; then exec omarchy-toggle-notification-silencing; fi
+        if have makoctl && makoctl mode >/dev/null 2>&1; then exec makoctl mode -t do-not-disturb; fi
+        if have dunstctl; then exec dunstctl set-paused toggle; fi
+        have notify-send && notify-send "IKAI" "No notification daemon to silence (mako or dunst)."; exit 1 ;;
+    esac ;;
+  which)
+    printf '{"compositor":"%s","terminal":"%s","launcher":"%s","omarchy":%s}\n' "$(compositor)" "$(terminal)" "$(launcher)" \
+      "$(have omarchy-shell && echo true || echo false)" ;;
+  *)
+    echo "usage: ito-host menu | tui COMMAND | workspace N | record | nightlight [status|toggle] | awake [status|toggle] | dnd [status|toggle] | which" >&2; exit 2 ;;
+esac

@@ -1,0 +1,2279 @@
+#!/usr/bin/env python3
+"""ito-assets — the index of the pictures you drew yourself (decisions-b9 section 6).
+
+Any PNG under ~/.config/ito/assets/<same path as bar/modules/ito-art> replaces the shipped picture of that name. This tool
+only READS that folder and writes one small index; it never copies or changes a picture, and runs no hook, unit or timer.
+
+    ito-assets index [--if-stale]   check every PNG and write ~/.cache/ito/assets-index.json (one JSON line on stdout)
+    ito-assets status               the index as it is now (no check)
+    ito-assets slots                the named slots of boot-screens-v2 D.3 (path, canvas, what each is for)
+    ito-assets ingest FILE --as SLOT [--light]
+                                    turn a generator picture (white ink on black; with --light black ink on white) into the
+                                    slot's transparent PNG, keep the original under _sources/, rebuild the index
+
+    ito-assets migrate-marks        rename marks/remina-real{,.light}.png (and its bar files) to marks/remina{,.light}.png (idempotent; `index` runs it)
+    ito-assets recipe eye-uzumaki|eye-lashed|eye-veined FILE [--dry-run]
+                                    the popup-head eyes of S14 from your spiral-eye engraving (1672x941), eye sheet (680x680) or eye cluster (1199x596):
+                                    eyes/<id>/{lid,iris}[.light].png (+ hot for the Uzumaki eye) at 512 wide and at the box heights 34 54 68 108.
+    ito-assets recipe ws-uzumaki-eye|mark-heather|mark-pyramid FILE [--iris FILE] [--dry-run]
+                                    S15c: workspaces/bar/<px>/ws-uzumaki-eye-<n>-<state>[.light|.alt].png from your bleeding-eye.png (105 px) or Silent Hill
+                                    sheet (1536x1024); marks/{heather,pyramid}[.light].png + marks/bar/<px>/ from your Heather / Pyramid roundel sheet (1536x1024).
+                                    `.alt` = the alternative definition (keys shMicro art, eyeWsIris plain). --iris: the 1672x941 engraving for the spiral iris.
+    ito-assets recipe tomie|uzumaki-eye|beetle|ws-beetle|ws-tomie FILE [--dry-run]
+                                    the photo recipes of S2c: the user's own Tommie drawing (565x933) or HD Tomie panel (1500x2000), engraving (1672x941) or beetle (920x920) cropped,
+                                    levelled and cut at every tier into marks/<name>{,.light}.png + marks/bar/<px>/ (ws-beetle: the Mayan-numeral
+                                    workspace set workspaces/bar/<px>/ws-beetle-<n>-<state>.png). Refused for any other size of source.
+    ito-assets recipe relic-sys|ws-symbols|relic-apps FILE [--dry-run] [--out DIR --ink R,G,B --blood R,G,B --light]
+                                    S18, from your shell asset sheet (1536x1024): bar icons relic/sys/bar/<px>/..., workspace family Symbols workspaces/bar/<px>/ws-symbols-<n>-<state>.png,
+                                    relic-apps = the icon theme Ito-verse-icons-v2 (colours baked, written to --out).
+    ito-assets recipe sprites FILE [--dry-run]
+                                    from your sprite sheet (SHASSETS.png, 1920x1080): marks pyramid-roundel, moth, eye-roundel, key;
+                                    hollow/bar/<px>/cassette-on|off, cup-on|off (indicator versions) and key.
+    ito-assets recipe pyramid-head FILE [--dry-run]
+                                    from your Pyramid Head side view (pyramid-head-hd-side.png, 1254x1254): workspace family `pyramid`
+                                    (workspaces/bar/<px>/ws-pyramid-<n>-<state>[.light].png, the ringed figure of your workspace sheet)
+                                    and the menu mark pyramid-head. Every workspace family recipe also writes the Control Centre
+                                    picker's numeral-free card art, ws-<family>-preview-active[.light].png.
+    ito-assets recipe ws-heather FILE [--dry-run]
+                                    from your Heather / Pyramid roundel sheet (Heather pyramid.png, 1536x1024): workspace family `heather`
+                                    (workspaces/bar/<px>/ws-heather-<n>-<state>[.light].png), her portrait in the workspace sheet's ring.
+    ito-assets recipe ws-cult [--dry-run]
+                                    workspace family Cult Symbols (style `cult`): Silent Hill's symbols (traced from skillunex.com/silent-hill-symbols) drawn per tier (no FILE):
+                                    workspaces/bar/<px>/ws-cult-<n>-<state>[.light].png, tiers 24-128.
+    ito-assets recipe sheets [--tomie FILE] [--pyramid FILE] [--sprites FILE] [--only KEY,...] [--dry-run]
+                                    the lock scenes of your Boot & Lock sheets, rebuilt in high resolution from your HD pictures (the sheet
+                                    cards are only the composition guides; no baked text): lock/<key>-2560x1440.png and lock/<key>-1920x1080.png
+                                    for tomie, pyramid, road, moth (lock designs of the same names), and cards/<key>.png (the boot compositions
+                                    card-<key> of ito-plymouth). Sources default to the copies in _sources/.
+    ito-assets recipe spiral [--dry-run]
+                                    the Sheet spiral at every tier (S15) from the shipped hand drawing: system/bar/<px>/system-normal.png (the hand drawing, enhanced) + system-normal-clean.png (centreline rebuild). The tomie /
+                                    uzumaki-eye / beetle recipes also write the v10 definition beside the v9 files (`<name>.v10{,.light}.png`, key markDef).
+    ito-assets recipe --list        the recipes (below)
+    ito-assets recipe lightink|lineart FILE --as REL [--crop x0,y0,x1,y1] [--erase x0,y0,x1,y1] [--size N|WxH] [--seal N]
+                                    [--bar] [--dry-run]
+                                    turn one picture of yours into theme-ready art (neutral ink + alpha, no opaque black):
+                                    lineart also writes the `.light` twin; --bar adds the 24/28/32/40/44/48/56/64/80/88 px files, and a
+                                    bar file that fails the legibility gate is not written. Writes only under the assets
+                                    folder (never inside a repo), keeps the source in _sources/, rebuilds the index.
+                                    --dry-run writes to a temp folder, prints the gate and deletes it.
+
+Light twin and bar sizes: `<dir>/<name>.light.png` is shown instead of `<dir>/<name>.png` on a light theme; `<dir>/bar/<px>/<name>.png`
+(exactly px x px, px in 24 28 32 40 44 48 56 64 80 88) is the bar-size picture of a shipped `<dir>/<name>.png`. Your menu marks: `marks/<name>.png`
+(512 x 512 +-1 %, name [a-z0-9-]{1,24}), `marks/<name>.light.png`, `marks/bar/<px>/<name>.png`: they show as `user:<name>` in the mark picker.
+
+Slots (boot/, screensaver/, fetch/, lock/, bg/, system/) have no shipped picture: they are listed under "slots" in the index with
+their own canvas check; the shell tints them with the theme, you never choose the colour. `_sources/` is never read as art.
+
+The shell reads the index; a picture that is not listed as ok is never used (the shipped picture stays). Limits: a PNG file,
+<= 8 MB, each side <= 4096 and <= 8 x the shipped side, >= 0.5 x the shipped side (a warning below 1 x), the aspect within
++-8 % of the shipped file, <= 16.7 Mpx, decodable. The folder `eye/` belongs to the lock screen's eye and is never mapped.
+Warnings (never a rejection): more than 20 % of the opaque pixels darker than 0.15 L (draw on transparent), pixel (0,0) not
+transparent (the drawn icons sample it), a colour file (it is flattened onto the theme by the shader).
+Test overrides: ITO_ASSETS_DIR, ITO_ASSETS_INDEX, ITO_ART_DIR.
+"""
+import hashlib, json, os, re, sys, time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))          # ito_sh (S17), a sibling module, whichever way this file is loaded
+HOME = Path(os.environ.get("HOME", "~")).expanduser()
+ASSETS = Path(os.environ.get("ITO_ASSETS_DIR") or HOME / ".config" / "ito" / "assets")
+INDEX = Path(os.environ.get("ITO_ASSETS_INDEX") or HOME / ".cache" / "ito" / "assets-index.json")
+ART = Path(os.environ.get("ITO_ART_DIR") or Path(__file__).resolve().parent.parent / "ito-art")
+MAX_BYTES, MAX_SIDE, MAX_PX, BUDGET = 8 * 1024 * 1024, 4096, 16.7e6, 20.0
+RESERVED = ("eye", "_sources", "lock", "cards")      # lock/, cards/: the lock scenes and boot cards of `recipe sheets` (read by ito-lock / ito-plymouth, not slots of the shell)
+
+
+# boot-screens-v2 D.3: slot -> (canvas w, h or None, aspect rule). aspect rule: ("ratio", r, tol) | ("range", lo, hi) | ("any",).
+# `.light.png` variants share the slot of the same name.
+def _r(w, h, tol=0.01):
+    return (w, h, ("ratio", w / h, tol))
+
+
+SLOTS = {
+    "boot/eye-shut.png": _r(1672, 941), "boot/wake-01.png": _r(1672, 941), "boot/wake-02.png": _r(1672, 941),
+    "boot/wake-03.png": _r(1672, 941), "boot/wake-04.png": _r(1672, 941),
+    "boot/bg.png": _r(2560, 1440), "screensaver/spiral.png": _r(2048, 2048),
+    "screensaver/fog-a.png": _r(3840, 720), "screensaver/fog-b.png": _r(3840, 720),
+    "screensaver/custom.png": (2560, 1440, ("custom",)), "fetch/logo.png": (1000, 1200, ("range", 0.6, 1.4)),
+    "lock/bg.png": _r(2560, 1440), "lock/mark.png": _r(512, 512), "bg/grain.png": _r(512, 512), "bg/screen.png": _r(2560, 1440),
+    "system/jar.png": _r(512, 512), "system/jar-fill.png": _r(512, 512),
+    "system/tray.png": _r(512, 512), "system/tray-fill.png": _r(512, 512),
+}
+SLOT_USE = {
+    "boot/eye-shut.png": "Plymouth, both tiers (the eye with the lids closed)", "boot/bg.png": "Plymouth tier I background",
+    "screensaver/spiral.png": "image screensaver: spiral", "screensaver/fog-a.png": "image screensaver: fog strip A",
+    "screensaver/fog-b.png": "image screensaver: fog strip B", "screensaver/custom.png": "image screensaver: custom",
+    "fetch/logo.png": "fastfetch / About logo", "lock/bg.png": "lock background", "lock/mark.png": "lock seal",
+    "bg/grain.png": "grain tile of every ground", "bg/screen.png": "screensaver background",
+    "system/jar.png": "bar tray jar", "system/jar-fill.png": "bar tray jar interior", "system/tray.png": "bar tray",
+    "system/tray-fill.png": "bar tray interior",
+}
+for _n in (1, 2, 3, 4):
+    SLOT_USE[f"boot/wake-0{_n}.png"] = "Plymouth tier I wake frame"
+
+
+def slot_of(rel):
+    """The registry key of a path (`fetch/logo.light.png` -> `fetch/logo.png`), or None."""
+    key = rel[:-10] + ".png" if rel.endswith(".light.png") else rel
+    return key if key in SLOTS else None
+
+
+# A1a / A1b: bar-size buckets, light twins and the user's menu marks.
+# S2c: the S2d tier list (bar = the nearest tier to round(size * dpr); cards 56/60 at 1x, 112/120 at 2x; 128 the biggest card).
+BAR_PX = (24, 26, 28, 30, 32, 36, 40, 44, 48, 56, 60, 64, 72, 80, 88, 96, 112, 120, 128)   # S15: + 26 (the new default mark size) and 30
+LEGACY_BAR_PX = (24, 28, 32, 40, 44, 48, 56, 64, 80, 88)     # what the generic lightink/lineart `--bar` has always written
+MARK_RE = re.compile(r"^marks/(?:bar/(\d+)/)?([a-z0-9-]{1,24})(?:\.v1[02])?(\.light)?\.png$")     # S15: `<name>.v10.png` = the v10 definition (markDef)
+V10_RE = re.compile(r"\.(v10|v12|alt)(\.light)?\.png$")     # `.alt` (S15c) = the alternative definition of a workspace family (shMicro art, eyeWsIris plain)
+BAR_RE = re.compile(r"^(.+)/bar/(\d+)/([^/]+)$")
+
+
+def split_bar(rel):
+    """`system/bar/28/menu-x.png` -> (`system/menu-x.png`, 28); anything else -> (rel, 0). Only the ten buckets count."""
+    m = BAR_RE.match(rel)
+    if m and int(m.group(2)) in BAR_PX:
+        return m.group(1) + "/" + m.group(3), int(m.group(2))
+    return rel, 0
+
+
+def mark_of(rel):
+    """`marks/beetle.light.png` -> (`beetle`, True, 0); `marks/bar/28/beetle.png` -> (`beetle`, False, 28); else None."""
+    m = MARK_RE.match(rel)
+    if not m:
+        return None
+    px = int(m.group(1)) if m.group(1) else 0
+    if m.group(1) and px not in BAR_PX:
+        return None
+    return m.group(2), bool(m.group(3)), px
+
+
+WS_FAMILIES = ("beetle", "tomie", "uzumaki-eye", "symbols", "gothic", "pyramid", "heather", "cult")     # `pyramid`: recipe pyramid-head (the side view in the ring; `pyramid-classic` was removed 2026-10-20); `heather`: recipe ws-heather; `cult`: recipe ws-cult (drawn, no source picture)     # v11: `tomie` = both faces / her two sides (the head-crop family `tomie-head` was removed in the HD pass)
+FAMILY_RE = re.compile(r"^workspaces/bar/(\d+)/ws-(" + "|".join(WS_FAMILIES) + r")-(\d{1,2}|preview)-(empty|occupied|active|urgent)(?:\.light)?\.png$")     # `preview`: the picker's numeral-free card art
+
+
+GOTHIC_BAN_RE = re.compile(r"^gothic/banners/(\d+)x(\d+)/(\d{1,2})-(inactive|occupied|active)(\.light)?\.png$")     # the workspace banners were removed; the user's existing banner files stay valid (source art for the lock designs), no recipe writes them
+GOTHIC_BANNERS = ((360, 64), (300, 46), (476, 88))
+SH_RE = re.compile(r"^(?:hollow|sh)/(?:bar/(\d+)/)?([a-z0-9-]{1,32})(\.light)?\.png$")     # S17a: the Hollow pack, hollow/ (S24; the old sh/ files still index; procedural pieces ship in ito-art/sh/, the pieces cut from your sheets live only here)
+
+
+# S18: the Relic bar icons (`relic/sys/bar/<px>/<icon>[-<state>].png`; S24: the old gothic/sys/ files still index), cut from the shell asset sheet
+GOTHIC_SYS_RE = re.compile(r"^(?:relic|gothic)/sys/bar/(\d+)/([a-z]+(?:-[a-z0-9]+)?)(\.light)?\.png$")
+
+
+def family_of(rel):
+    """`workspaces/bar/28/ws-beetle-3-active.png` -> (`beetle`, `3`, `active`): a workspace family that ships no base picture (S2c); else None."""
+    m = FAMILY_RE.match(rel)
+    if not m or int(m.group(1)) not in BAR_PX or (m.group(3) != "preview" and not 1 <= int(m.group(3)) <= 10):
+        return None
+    return m.group(2), m.group(3), m.group(4)
+
+
+# S14: the popup-head eyes made from the user's sheets. `eyes/<id>/<layer>[.light].png` is the 512-wide master, `eyes/<id>/h<H>/<layer>[.light].png` the
+# tier for a box H px high (the popup head 34, the Control Centre card 54, and their x2). Layers: lid (lashes, lid, sclera: a hole where the iris is), iris (the
+# disc that turns) and, for the Uzumaki eye only, hot (the iris in blood). The blood point is drawn by the shell, never baked.
+EYE_IDS = ("uzumaki", "lashed", "veined")
+EYE_TIERS = (34, 54, 68, 108)
+EYE_AR = {"uzumaki": (1129, 589), "lashed": (178, 100), "veined": (410, 285)}      # the crop's width : height
+EYE_RE = re.compile(r"^eyes/(" + "|".join(EYE_IDS) + r")/(?:h(\d+)/)?(lid|iris|hot)(\.light)?\.png$")
+
+
+def eye_of(rel):
+    """`eyes/uzumaki/h34/iris.light.png` -> (`uzumaki`, `iris`, True, 34); the master has H 0; anything else None."""
+    m = EYE_RE.match(rel)
+    if not m or (m.group(2) and int(m.group(2)) not in EYE_TIERS) or (m.group(3) == "hot" and m.group(1) != "uzumaki"):
+        return None
+    return m.group(1), m.group(3), bool(m.group(4)), int(m.group(2) or 0)
+
+
+def eye_size(eid, H):
+    """(w, h) of a product: the 512-wide master (H 0) or the tier of height H."""
+    aw, ah = EYE_AR[eid]
+    return (512, round(512 * ah / aw)) if H == 0 else (round(H * aw / ah), H)
+
+
+def aspect_ok(slot, w, h):
+    rule = SLOTS[slot][2]
+    a = w / h
+    if rule[0] == "ratio":
+        return abs(a / rule[1] - 1.0) <= rule[2]
+    if rule[0] == "range":
+        return rule[1] <= a <= rule[2]
+    if rule[0] == "custom":
+        return abs(a / (16 / 9) - 1.0) <= 0.01 or abs(a - 1.0) <= 0.01
+    return True
+
+
+def out(obj, code=0):
+    print(json.dumps(obj, ensure_ascii=False))
+    sys.exit(code)
+
+
+def walk():
+    """[(rel, path)] of every .png under the assets folder, except the reserved folders; never follows links out."""
+    found = []
+    if not ASSETS.is_dir():
+        return found
+    for root, dirs, files in os.walk(ASSETS, followlinks=False):
+        rel_root = Path(root).relative_to(ASSETS)
+        if rel_root == Path("."):
+            dirs[:] = [d for d in dirs if d not in RESERVED]
+        for f in files:
+            if f.lower().endswith(".png"):
+                found.append(((rel_root / f).as_posix(), Path(root) / f))
+    return sorted(found)
+
+
+def signature(found):
+    h = hashlib.sha1()
+    for rel, p in found:
+        try:
+            st = p.stat()
+            h.update(f"{rel}|{st.st_size}|{st.st_mtime_ns}\n".encode())
+        except OSError:
+            h.update(f"{rel}|gone\n".encode())
+    h.update(str(ART).encode())
+    return h.hexdigest()[:16]
+
+
+def load_index():
+    try:
+        return json.loads(INDEX.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def check(rel, path, deadline):
+    """(entry, warnings) or raises ValueError(reason)."""
+    from PIL import Image
+    v10 = bool(V10_RE.search(rel))
+    alt = bool(re.search(r"\.alt(\.light)?\.png$", rel))
+    mk = mark_of(rel)
+    rel = V10_RE.sub(lambda m: (m.group(2) or "") + ".png", rel)       # S15: a v10 file is checked like the plain one beside it
+    wf = family_of(rel)
+    ey = eye_of(rel)
+    base, px = split_bar(rel)
+    plain = base[:-10] + ".png" if base.endswith(".light.png") else base
+    shipped = ART / rel
+    sh = SH_RE.match(rel)
+    gs = GOTHIC_SYS_RE.match(rel)
+    gb = GOTHIC_BAN_RE.match(rel)
+    if gb and (int(gb.group(1)), int(gb.group(2))) not in GOTHIC_BANNERS:
+        raise ValueError("a gothic banner is 360x64, 300x46 or 476x88")
+    if gs and int(gs.group(1)) not in BAR_PX:
+        raise ValueError("not a bar-size tier")
+    gg = bool(gs or gb)
+    slot = None if (shipped.is_file() or mk or wf or ey or sh or gg) else slot_of(rel)
+    if not shipped.is_file() and not mk and not wf and not ey and not sh and not gg and slot is None:
+        # a light twin or a bar-size bucket of a shipped picture (or of a named slot) is checked against that picture
+        if (px or plain != base) and (ART / plain).is_file():
+            shipped = ART / plain
+        elif (px or plain != base) and slot_of(plain):
+            slot = slot_of(plain)
+        else:
+            raise ValueError("no shipped picture or named slot of that name")
+    if time.time() > deadline:
+        raise ValueError("skipped: the check ran out of time (20 s)")
+    st = path.stat()
+    if st.st_size > MAX_BYTES:
+        raise ValueError("larger than 8 MB")
+    with open(path, "rb") as fh:
+        if fh.read(8) != b"\x89PNG\r\n\x1a\n":
+            raise ValueError("not a PNG file")
+    old = Image.MAX_IMAGE_PIXELS
+    Image.MAX_IMAGE_PIXELS = int(MAX_PX)
+    try:
+        try:
+            with Image.open(path) as im:
+                w, h = im.size
+                if w * h > MAX_PX:
+                    raise ValueError("more than 16.7 megapixels")
+                im.verify()
+            with Image.open(path) as im:
+                im.load()
+                rgba = im.convert("RGBA")
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"cannot be decoded ({type(e).__name__})")
+    finally:
+        Image.MAX_IMAGE_PIXELS = old
+    if px and (w, h) != (px, px):
+        raise ValueError(f"a bar-size picture is exactly {px}x{px} (this is {w}x{h})")
+    if gb and (w, h) != (int(gb.group(1)), int(gb.group(2))):
+        raise ValueError(f"a banner is exactly {gb.group(1)}x{gb.group(2)} (this is {w}x{h})")
+    if ey:
+        ew, eh = eye_size(ey[0], ey[3])
+        if abs(w - ew) > max(1, 0.01 * ew) or abs(h - eh) > max(1, 0.015 * eh):
+            raise ValueError(f"an eye picture of {ey[0]} is {ew}x{eh} here (this is {w}x{h})")
+        sw, shh = ew, eh
+    elif wf:
+        sw = shh = px
+    elif gg:
+        sw, shh = w, h
+    elif sh:
+        if max(w, h) > MAX_SIDE:
+            raise ValueError(f"too large ({w}x{h}; at most {MAX_SIDE} a side)")
+        sw, shh = w, h
+    elif mk:
+        if not px and (abs(w / 512 - 1.0) > 0.01 or abs(h / 512 - 1.0) > 0.01):
+            raise ValueError(f"a menu mark is 512x512 (within 1 %); this is {w}x{h}")
+        sw = shh = px or 512
+    elif px:
+        sw = shh = px
+    elif slot:
+        sw, shh = SLOTS[slot][0], SLOTS[slot][1]
+        if max(w, h) > MAX_SIDE:
+            raise ValueError(f"too large ({w}x{h}; at most {MAX_SIDE} a side)")
+        if w < 0.25 * sw and h < 0.25 * shh:
+            raise ValueError(f"too small ({w}x{h}; the slot is {sw}x{shh})")
+        if not aspect_ok(slot, w, h):
+            raise ValueError(f"aspect {w}:{h} does not fit the slot {slot} ({sw}x{shh})")
+    else:
+        try:
+            with Image.open(shipped) as shipped_im:     # not `sh`: that name is the sh/ pack regex match used below
+                sw, shh = shipped_im.size
+        except Exception:
+            raise ValueError("the shipped picture cannot be read")
+        if max(w, h) > MAX_SIDE or w > 8 * sw or h > 8 * shh:
+            raise ValueError(f"too large ({w}x{h}; shipped is {sw}x{shh})")
+        if w < 0.5 * sw or h < 0.5 * shh:
+            raise ValueError(f"too small ({w}x{h}; shipped is {sw}x{shh})")
+        if abs((w / h) / (sw / shh) - 1.0) > 0.08:
+            raise ValueError(f"aspect {w}:{h} is not within 8 % of the shipped {sw}:{shh}")
+    warn = []
+    if w < sw or h < shh:
+        warn.append(f"smaller than the shipped {sw}x{shh}")
+    try:
+        import numpy as np
+        a = np.asarray(rgba, np.float32) / 255.0
+        op = a[..., 3] > 0.5
+        n = int(op.sum())
+        if n:
+            lum = 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
+            if not slot and float((op & (lum < 0.15)).sum()) / n > 0.20:
+                warn.append("more than 20 % of the drawing is near black: draw on a transparent ground")
+            rgb = a[..., :3]
+            nonred = op & ~(rgb[..., 0] > 1.3 * np.maximum(rgb[..., 1], rgb[..., 2]))
+            if nonred.any() and float((rgb.max(-1) - rgb.min(-1))[nonred].mean()) > 0.15:
+                warn.append("a colour picture: the theme shader flattens colour onto bone and blood")
+        if a[0, 0, 3] > 0.02:
+            warn.append("pixel (0,0) is not transparent (the drawn icons sample it)")
+    except ImportError:
+        pass
+    entry = {"mtime": int(st.st_mtime * 1000), "w": w, "h": h}
+    if v10:
+        entry["alt" if alt else "v10"] = True
+    if px:
+        entry["bar"] = px
+    if ey:
+        entry["slot"] = f"eyes/{ey[0]}/{ey[1]}.png"        # listed under "slots": an eye is a new picture, it replaces nothing shipped
+        entry["eye"] = ey[0]
+        entry["light"] = ey[2]
+        if ey[3]:
+            entry["tier"] = ey[3]
+    elif wf:
+        entry["slot"] = f"workspaces/ws-{wf[0]}-{wf[1]}-{wf[2]}.png"     # a family with no shipped base: a new picture, listed under "slots"
+        entry["family"] = wf[0]
+    elif gs:
+        entry["slot"] = rel.split("/")[0] + "/sys/" + gs.group(2) + ".png"     # relic/sys/ (S24) or the old gothic/sys/       # listed under "slots": a new picture, it replaces nothing shipped
+        entry["light"] = bool(gs.group(3))
+    elif gb:
+        entry["slot"] = "gothic/banners/" + gb.group(3) + "-" + gb.group(4) + ".png"
+        entry["light"] = bool(gb.group(5))
+    elif sh:
+        entry["slot"] = rel.split("/")[0] + "/" + sh.group(2) + ".png"     # hollow/ (S24) or the old sh/       # listed under "slots": the pack's own names; a shipped twin of the same path is replaced
+        entry["light"] = bool(sh.group(3))
+    elif mk:
+        entry["slot"] = f"marks/{mk[0]}.png"       # listed under "slots": a mark is a new picture, it replaces nothing shipped
+        entry["mark"] = mk[0]
+        entry["light"] = mk[1]
+    elif slot:
+        entry["slot"] = slot
+        entry["light"] = rel.endswith(".light.png")
+    return entry, warn
+
+
+def build():
+    found = walk()
+    sig = signature(found)
+    files, slots, rejected, warnings = {}, {}, {}, {}
+    deadline = time.time() + BUDGET
+    try:
+        import PIL  # noqa: F401
+        have = True
+    except ImportError:
+        have = False
+    for rel, p in found:
+        if not have:
+            rejected[rel] = "Pillow is missing: the pictures cannot be checked"
+            continue
+        try:
+            entry, warn = check(rel, p, deadline)
+            (slots if "slot" in entry else files)[rel] = entry
+            if warn:
+                warnings[rel] = warn
+        except ValueError as e:
+            rejected[rel] = str(e)
+        except OSError as e:
+            rejected[rel] = f"cannot be read ({e.__class__.__name__})"
+    return {"version": 1, "root": str(ASSETS), "sig": sig, "files": files, "slots": slots, "rejected": rejected, "warnings": warnings}
+
+
+def write(index):
+    INDEX.parent.mkdir(parents=True, exist_ok=True)
+    tmp = INDEX.with_name(INDEX.name + f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(index, indent=1, sort_keys=True) + "\n")
+    os.replace(tmp, INDEX)
+
+
+IN_MAX_BYTES, IN_EXT = 32 * 1024 * 1024, (".png", ".jpg", ".jpeg", ".webp")
+
+
+def slot_arg(name):
+    """`fetch/logo`, `fetch/logo.png` -> the registry key; anything else is refused with the list."""
+    n = name.strip().lstrip("/")
+    if n.startswith("eye/"):
+        out({"error": "eye/ belongs to the lock screen's eye and is not an ingest slot (drop its files there by hand)"}, 1)
+    n = n[:-10] + ".png" if n.endswith(".light.png") else n
+    n = n if n.endswith(".png") else n + ".png"
+    if n not in SLOTS:
+        out({"error": f"unknown slot {name!r}; slots: " + ", ".join(sorted(SLOTS))}, 1)
+    return n
+
+
+def levels(img, light):
+    """(alpha float [0,1], mean_chroma, notes) from a picture of ink on a flat ground: white on black, or black on white (--light).
+    Black point = the 10th percentile of the border + 0.02, white point = the 99.5th percentile of the ink."""
+    import numpy as np
+    a = np.asarray(img.convert("RGB"), np.float32) / 255.0
+    lum = 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
+    ink = 1.0 - lum if light else lum
+    h, w = ink.shape
+    t = max(2, int(round(0.01 * min(h, w))))
+    ring = np.concatenate([ink[:t].ravel(), ink[-t:].ravel(), ink[:, :t].ravel(), ink[:, -t:].ravel()])
+    if float(ring.mean()) > 0.5:
+        raise ValueError("the ground is " + ("black" if light else "white") + ": generate " +
+                         ("black ink on pure white for --light" if light else "white ink on pure black (or pass --light for black ink on white)"))
+    bp = float(np.percentile(ring, 10)) + 0.02
+    wp = float(np.percentile(ink, 99.5))
+    if wp - bp < 0.08:
+        raise ValueError("no ink found: the picture is empty or the ground is not plain")
+    alpha = np.clip((ink - bp) / (wp - bp), 0.0, 1.0)
+    mask = alpha > 0.05
+    chroma = float((a.max(-1) - a.min(-1))[mask].mean()) if mask.any() else 0.0
+    return alpha, chroma, {"black_point": round(bp, 3), "white_point": round(wp, 3)}
+
+
+def cmd_ingest(argv):
+    import shutil
+    slot = file = None
+    light = False
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--as" and i + 1 < len(argv):
+            slot = slot_arg(argv[i + 1])
+            i += 2
+        elif a == "--light":
+            light = True
+            i += 1
+        elif not a.startswith("-") and file is None:
+            file = Path(a).expanduser()
+            i += 1
+        else:
+            out({"error": "usage: ito-assets ingest FILE --as SLOT [--light]"}, 2)
+    if not file or not slot:
+        out({"error": "usage: ito-assets ingest FILE --as SLOT [--light]"}, 2)
+    try:
+        import numpy as np
+        from PIL import Image
+    except ImportError:
+        out({"error": "Pillow and numpy are needed to ingest a picture"}, 1)
+    if file.is_symlink() or not file.is_file():
+        out({"error": f"{file} is not a regular file"}, 1)
+    if file.suffix.lower() not in IN_EXT:
+        out({"error": "ingest takes a PNG, JPEG or WebP picture"}, 1)
+    if file.stat().st_size > IN_MAX_BYTES:
+        out({"error": "the picture is larger than 32 MB"}, 1)
+    Image.MAX_IMAGE_PIXELS = int(MAX_PX)
+    try:
+        with Image.open(file) as im:
+            if im.format not in ("PNG", "JPEG", "WEBP"):
+                raise ValueError(f"a {im.format} file is not accepted")
+            im.verify()
+        with Image.open(file) as im:
+            im.load()
+            src = im.convert("RGBA")
+    except ValueError as e:
+        out({"error": f"rejected: {e}"}, 1)
+    except Exception as e:
+        out({"error": f"rejected: the picture cannot be decoded ({type(e).__name__})"}, 1)
+    warnings = []
+    arr = np.asarray(src)
+    if float((arr[..., 3] < 230).mean()) > 0.01:                      # the generator did give real transparency: keep it
+        alpha = arr[..., 3].astype(np.float32) / 255.0
+        a = arr[..., :3].astype(np.float32) / 255.0
+        chroma = float((a.max(-1) - a.min(-1))[alpha > 0.05].mean()) if (alpha > 0.05).any() else 0.0
+        notes = {"alpha": "kept"}
+    else:
+        try:
+            alpha, chroma, notes = levels(src, light)
+        except ValueError as e:
+            out({"error": f"rejected: {e}"}, 1)
+    if chroma > 0.08:
+        warnings.append(f"the picture is not monochrome (mean chroma {chroma:.2f}): colour is dropped, the shell tints it")
+    h, w = alpha.shape
+    alpha[:1], alpha[-1:], alpha[:, :1], alpha[:, -1:] = 0, 0, 0, 0       # nothing touches the edge: corners are transparent
+    rgb = np.full((h, w, 3), 0 if light else 255, np.uint8)
+    res = Image.fromarray(np.dstack([rgb, np.round(alpha * 255).astype(np.uint8)]), "RGBA")
+    if max(w, h) > MAX_SIDE:
+        k = MAX_SIDE / max(w, h)
+        res = res.resize((max(1, round(w * k)), max(1, round(h * k))), Image.LANCZOS)
+        warnings.append(f"scaled down from {w}x{h}")
+    w, h = res.size
+    if not aspect_ok(slot, w, h):
+        out({"error": f"rejected: {w}:{h} does not fit the slot {slot} (canvas {SLOTS[slot][0]}x{SLOTS[slot][1]}, aspect within 1 %)"}, 1)
+    dest = ASSETS / (slot[:-4] + ".light.png" if light else slot)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + f".{os.getpid()}.tmp")
+    for _try in range(6):
+        res.save(tmp, format="PNG", optimize=True)
+        if tmp.stat().st_size <= MAX_BYTES:
+            break
+        res = res.resize((int(res.width * 0.85), int(res.height * 0.85)), Image.LANCZOS)
+        warnings.append("scaled down to fit 8 MB")
+    else:
+        tmp.unlink(missing_ok=True)
+        out({"error": "rejected: the result is larger than 8 MB even scaled down"}, 1)
+    os.replace(tmp, dest)
+    keep = ASSETS / "_sources" / (dest.relative_to(ASSETS).as_posix().replace("/", "__")[:-4] + file.suffix.lower())
+    keep.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(file, keep)
+    idx = build()
+    write(idx)
+    rel = dest.relative_to(ASSETS).as_posix()
+    listed = rel in idx["slots"]
+    out({"ok": listed, "slot": slot, "file": str(dest), "size": list(res.size), "source": str(keep), "levels": notes,
+         "warnings": warnings, "indexed": listed, **({} if listed else {"rejected": idx["rejected"].get(rel)})}, 0 if listed else 1)
+
+
+# ---- A1d: recipes (decisions-userart section 1 and 6) ---------------------------------------------------------
+# A recipe turns ONE picture of the user's into theme-ready art: neutral ink (R=G=B=200) + alpha, never an opaque dark ground.
+# The pixels go to ~/.config/ito/assets (never into a repo); the recipe is just code and numbers.
+INK = 200
+RECIPES = {
+    "lightink": "white ink on black (a light drawing on a dark ground): alpha = the levels of the luminance; one file for both themes",
+    "lineart": "black ink on white paper: <rel> = paper polarity (the paper inside the figure is ink, for dark themes) and "
+               "<rel>.light = ink polarity (for light themes); the bar-size files are ink polarity, grown so thin lines survive",
+}
+GATE = {"crisp": 0.45, "fill": 0.55, "black": 0.05}      # decisions-barsize section 3 (crisp >=, fill <=, black <=)
+RECIPE_USAGE = ("usage: ito-assets recipe --list | recipe lightink|lineart FILE --as REL [--crop x0,y0,x1,y1] [--erase x0,y0,x1,y1] "
+                "[--size N|WxH] [--seal N] [--bar] [--dry-run]")
+
+
+def _box(text):
+    try:
+        v = [int(x) for x in text.split(",")]
+    except ValueError:
+        v = []
+    if len(v) != 4 or v[2] <= v[0] or v[3] <= v[1]:
+        out({"error": f"bad box {text!r}: x0,y0,x1,y1 in pixels"}, 2)
+    return tuple(v)
+
+
+def _lum(im):
+    import numpy as np
+    a = np.asarray(im.convert("RGB"), np.float32) / 255.0
+    return 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
+
+
+def _outside(L, seal):
+    """the paper outside the figure: flood from the border over light pixels after sealing the contour by `seal` px."""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    dark = Image.fromarray(((L < 0.62) * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(2 * seal + 1))
+    img = Image.fromarray(np.pad(np.where(np.asarray(dark) == 0, 255, 0).astype(np.uint8), 1, constant_values=255)).copy()
+    ImageDraw.floodfill(img, (0, 0), 128)
+    o = Image.fromarray(((np.asarray(img)[1:-1, 1:-1] == 128) * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(max(1, 2 * seal - 1)))
+    return np.asarray(o) > 0
+
+
+def _rgba(alpha):
+    import numpy as np
+    from PIL import Image
+    h, w = alpha.shape
+    o = np.zeros((h, w, 4), np.uint8)
+    o[..., :3] = INK
+    o[..., 3] = np.round(np.clip(alpha, 0, 1) * 255)
+    o[:1, :, 3] = o[-1:, :, 3] = 0                      # nothing touches the edge: the corners are transparent
+    o[:, :1, 3] = o[:, -1:, 3] = 0
+    return Image.fromarray(o, "RGBA")
+
+
+def _down(img, size):
+    import numpy as np
+    from PIL import Image
+    r = np.array(img.convert("RGBa").resize(size, Image.LANCZOS).convert("RGBA"))      # premultiplied: no dark fringe
+    r[..., :3] = INK                                                                    # the ink stays exactly neutral
+    return Image.fromarray(r, "RGBA")
+
+
+def _metrics(img):
+    import numpy as np
+    arr = np.asarray(img, np.float32) / 255.0
+    a, rgb = arr[..., 3], arr[..., :3]
+    mx = float(a.max()) or 1.0
+    crisp = float((a >= 0.6 * mx).sum()) / max(1, int((a >= 0.15 * mx).sum()))
+    h, w = a.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    disc = np.hypot(xx - (w - 1) / 2, yy - (h - 1) / 2) <= min(w, h) / 2
+    fill = float(((a >= 0.5) & disc).sum()) / max(1, int(disc.sum()))
+    black = float(((a > 0.85) & (rgb.mean(-1) < 0.15)).sum()) / max(1, int((a > 0.15).sum()))
+    return {"crisp": round(crisp, 2), "fill": round(fill, 2), "black": round(black, 2)}
+
+
+def _target(rel):
+    """(w, h) the product has by default, or exit: a recipe only writes where the shell would read it."""
+    if rel.endswith(".light.png") or not rel.endswith(".png") or rel.startswith(("eye/", "_sources/")) or ".." in rel:
+        out({"error": f"{rel!r} is not a plain target path (<dir>/<name>.png; the .light twin and bar files are made for you)"}, 2)
+    if mark_of(rel) and mark_of(rel)[1:] == (False, 0):
+        return (512, 512)
+    if (ART / rel).is_file():
+        from PIL import Image
+        with Image.open(ART / rel) as sh:
+            return sh.size
+    if slot_of(rel):
+        return (SLOTS[rel][0], SLOTS[rel][1])
+    out({"error": f"{rel!r} is neither a shipped picture, a named slot nor marks/<name>.png"}, 2)
+
+
+def make_recipe(kind, src, rel, crop=None, erase=None, size=None, seal=4, bar=False):
+    """[(rel, PIL RGBA)] and a list of notes for one source picture. Pure (no files)."""
+    import numpy as np
+    from PIL import Image, ImageFilter
+    ground = 0.0 if kind == "lightink" else 1.0
+    L = _lum(src)
+    notes = []
+    if erase:
+        L[erase[1]:erase[3], erase[0]:erase[2]] = ground
+    if crop:
+        if crop[2] > L.shape[1] or crop[3] > L.shape[0] or min(crop[:2]) < 0:
+            raise ValueError(f"the crop {crop} is outside the {L.shape[1]}x{L.shape[0]} picture")
+        L = L[crop[1]:crop[3], crop[0]:crop[2]]
+    tw, th = size or _target(rel)
+    if abs(tw / th - 1.0) <= 0.01 and L.shape[0] != L.shape[1]:        # a square product: centre the crop on a square canvas
+        side = max(L.shape) + 16
+        sq = np.full((side, side), ground, np.float32)
+        y0, x0 = (side - L.shape[0]) // 2, (side - L.shape[1]) // 2
+        sq[y0:y0 + L.shape[0], x0:x0 + L.shape[1]] = L
+        L = sq
+    elif abs((L.shape[1] / L.shape[0]) / (tw / th) - 1.0) > 0.01:
+        raise ValueError(f"the picture is {L.shape[1]}:{L.shape[0]}, the target {rel} is {tw}:{th}: crop it to that shape (--crop)")
+    L8 = Image.fromarray(np.round(L * 255).astype(np.uint8))
+    products = []
+    if kind == "lightink":
+        alpha, chroma, lv = levels(L8, False)
+        notes.append(f"levels {lv}")
+        products.append((rel, _down(_rgba(alpha), (tw, th))))
+    else:
+        paper = np.clip((L - 0.35) / 0.55, 0, 1)
+        paper[_outside(L, seal)] = 0
+        ink = np.clip((0.78 - L) / 0.60, 0, 1)
+        products.append((rel, _down(_rgba(paper), (tw, th))))
+        products.append((rel[:-4] + ".light.png", _down(_rgba(ink), (tw, th))))
+    if bar:
+        if tw != th:
+            raise ValueError("bar-size files are square: the target is not")
+        d, f = rel.rsplit("/", 1) if "/" in rel else ("", rel)
+        for px in LEGACY_BAR_PX:
+            if kind == "lightink":
+                bimg = _down(_rgba(alpha), (px, px))
+            else:
+                l4 = np.asarray(L8.resize((4 * px, 4 * px), Image.LANCZOS).filter(ImageFilter.MinFilter(5)), np.float32) / 255
+                bimg = _down(_rgba(np.clip((0.70 - l4) / 0.30, 0, 1)), (px, px))
+            products.append(((d + "/" if d else "") + f"bar/{px}/{f}", bimg))
+    return products, notes
+
+
+def cmd_recipe(argv):
+    import shutil, tempfile
+    if argv[:1] == ["--list"]:
+        out({"ok": True, "recipes": {**RECIPES, **PHOTO_RECIPES}, "gate": GATE, "photo_gate": TONAL})
+    if len(argv) < 1 or argv[0] not in RECIPES:
+        out({"error": RECIPE_USAGE}, 2)
+    kind, file, rel, crop, erase, size, seal, bar, dry = argv[0], None, None, None, None, None, 4, False, False
+    i = 1
+    while i < len(argv):
+        a = argv[i]
+        if a == "--as" and i + 1 < len(argv):
+            rel, i = argv[i + 1].strip().lstrip("/"), i + 2
+            rel = rel if rel.endswith(".png") else rel + ".png"
+        elif a == "--crop" and i + 1 < len(argv):
+            crop, i = _box(argv[i + 1]), i + 2
+        elif a == "--erase" and i + 1 < len(argv):
+            erase, i = _box(argv[i + 1]), i + 2
+        elif a == "--size" and i + 1 < len(argv):
+            m = re.fullmatch(r"(\d{1,4})(?:x(\d{1,4}))?", argv[i + 1])
+            if not m:
+                out({"error": RECIPE_USAGE}, 2)
+            size, i = (int(m.group(1)), int(m.group(2) or m.group(1))), i + 2
+        elif a == "--seal" and i + 1 < len(argv) and argv[i + 1].isdigit():
+            seal, i = max(1, min(12, int(argv[i + 1]))), i + 2
+        elif a == "--bar":
+            bar, i = True, i + 1
+        elif a == "--dry-run":
+            dry, i = True, i + 1
+        elif not a.startswith("-") and file is None:
+            file, i = Path(a).expanduser(), i + 1
+        else:
+            out({"error": RECIPE_USAGE}, 2)
+    if not file or not rel:
+        out({"error": RECIPE_USAGE}, 2)
+    repo = ART.resolve().parents[2]
+    if not dry and (ASSETS.resolve() == repo or repo in ASSETS.resolve().parents):
+        out({"error": f"refused: {ASSETS} is inside {repo}; user pictures never go into a repo"}, 1)
+    try:
+        import numpy  # noqa: F401
+        from PIL import Image
+    except ImportError:
+        out({"error": "Pillow and numpy are needed for a recipe"}, 1)
+    if file.is_symlink() or not file.is_file() or file.suffix.lower() not in IN_EXT or file.stat().st_size > IN_MAX_BYTES:
+        out({"error": f"{file} is not a regular PNG/JPEG/WebP file of at most 32 MB"}, 1)
+    Image.MAX_IMAGE_PIXELS = int(MAX_PX)
+    try:
+        with Image.open(file) as im:
+            im.load()
+            src = im.convert("RGBA") if im.mode in ("RGBA", "LA", "P") else im.convert("RGB")
+        if src.mode == "RGBA":                                  # flatten any transparency onto the kind's ground
+            bg = Image.new("RGBA", src.size, (0, 0, 0, 255) if kind == "lightink" else (255, 255, 255, 255))
+            src = Image.alpha_composite(bg, src).convert("RGB")
+        products, notes = make_recipe(kind, src, rel, crop, erase, size, seal, bar)
+    except ValueError as e:
+        out({"error": f"rejected: {e}"}, 1)
+    except Exception as e:
+        out({"error": f"rejected: the picture cannot be read ({type(e).__name__})"}, 1)
+    root = Path(tempfile.mkdtemp(prefix="ito-recipe-")) if dry else ASSETS
+    report, written, refused = [], [], []
+    try:
+        for prel, img in products:
+            m = _metrics(img)
+            is_bar = split_bar(prel)[1] > 0
+            ok = m["black"] <= GATE["black"] and (not is_bar or (m["crisp"] >= GATE["crisp"] and m["fill"] <= GATE["fill"]))
+            report.append({"file": prel, "gate": "pass" if ok else "FAIL", **m})
+            if not ok:
+                refused.append(prel)                              # a failing bar file is not offered (it may still be used >= 48 px)
+                continue
+            dest = root / prel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dest.with_name(dest.name + f".{os.getpid()}.tmp")
+            img.save(tmp, format="PNG", optimize=True)
+            os.replace(tmp, dest)
+            written.append(prel)
+        rejected = {}
+        if dry:
+            deadline = time.time() + BUDGET
+            for prel in written:
+                try:
+                    check(prel, root / prel, deadline)
+                except ValueError as e:
+                    rejected[prel] = str(e)
+        elif kind != "spiral":
+            keep = ASSETS / "_sources" / (rel.replace("/", "__")[:-4] + file.suffix.lower())
+            keep.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(file, keep)
+            idx = build()
+            write(idx)
+            rejected = {p: idx["rejected"][p] for p in written if p in idx["rejected"]}
+    finally:
+        if dry:
+            shutil.rmtree(root, ignore_errors=True)
+    out({"ok": not rejected and bool(written), "recipe": kind, "dry_run": dry, "target": str(ASSETS / rel), "written": [] if dry else written,
+         "would_write": written if dry else [], "not_offered": refused, "rejected": rejected, "gate": report, "notes": notes},
+        0 if written and not rejected else 1)
+
+
+# ---- S2c: photo recipes (tomie, uzumaki-eye, beetle, ws-beetle) ---------------------------------------------------
+# Ports of the lab generators (tomie.py, uzeye.py, beetle.py): the user's own picture is cropped, levelled and cut at every tier, never
+# redrawn. Colour = neutral ink (200) + the one blood accent the picture itself carries (200,16,20). The pixels go under the assets folder.
+RECIPE_ALIASES = {"gothic-sys": "relic-sys", "ws-gothic": "ws-symbols", "gothic-apps": "relic-apps", "sh-pack": "hollow-pack"}
+PHOTO_RECIPES = {
+    "tomie": "your Tommie drawing (565x933) or your HD Tomie panel (1500x2000, only the inside of its frame is read): the die-cut head sticker at every tier; mole = blood",
+    "uzumaki-eye": "your spiral-eye engraving (1672x941): the whole eye at every tier; the spiral's centre = blood",
+    "beetle": "your beetle (920x920): ink polarity on every theme; the abdomen eye = blood",
+    "ws-beetle": "workspace family: the beetle over a Mayan dot-and-bar numeral (dot 1, bar 5), 10 numbers x 4 states (+ the sharper v10 files, key wsBeetleDef)",
+    "ws-tomie": "workspace family from your Tommie drawing (565x933) or HD Tomie panel (1500x2000): her eye + mole + a numeral; the second face in a circle when active, in blood when urgent",
+    "ws-uzumaki-eye": "workspace family from your bleeding-eye.png (105 px: native up to 96, 112/128 are a gentle upscale): the eye bleeds on the active one; the iris is your spiral engraving's when `_sources/uzumaki-eye__*` (1672x941) or --iris has it",
+    "mark-heather": "menu mark Heather from your Heather / Pyramid roundel sheet (1536x1024): a sigil (broken ring, blood ticks, her glyph) at 24-32, her portrait from 36",
+    "mark-pyramid": "menu mark Pyramid from your Heather / Pyramid roundel sheet (1536x1024): a sigil (broken ring, blood ticks, a blood triangle) at 24-32, the helmet from 36",
+    "hollow-pack": "the Hollow asset pack (S17a, old recipe name sh-pack) from your fog-town sheet (1536x1024) + your Heather / Pyramid sheet (`--hp`): hollow/<asset>[.light].png + hollow/bar/<px>/ (radio, sign, lamp, fog, streaks, roundel) and the procedural pieces redistressed with YOUR grain (sh/grain.png)",
+    "relic-sys": "bar icons of the Relic style (`iconStyle relic`, id gothic; old recipe name gothic-sys) from your shell asset sheet (1536x1024): relic/sys/bar/<px>/<icon>[-<state>].png, tiers 24-64 (gpu from 32, ai from 30; below that the shell keeps the current drawing)",
+    "ws-symbols": "workspace family Symbols (style `symbols`, old id `gothic`; old recipe name ws-gothic; files ws-symbols-*) from your shell asset sheet (1536x1024): its symbol tiles, three engraved marks in place of the faces (3 hourglass, 5 pentagram, 9 key) + ws 10 = the vinyl, workspaces/bar/<px>/ws-symbols-<n>-<state>.png, tiers 24-64",
+    "relic-apps": "app icon theme Ito-verse-icons v2 from your shell asset sheet (1536x1024): colours baked from the theme (--ink R,G,B --blood R,G,B); written to --out DIR (default ~/.local/share/icons), never to the assets folder",
+    "spiral": "the Sheet spiral at every tier from the shipped hand drawing (system-normal.png, 282x282; no FILE needed): the hand drawing enhanced (system/bar/<px>/system-normal.png) + its centreline rebuilt as a clean ribbon (system-normal-clean.png)",
+    "eye-uzumaki": "the popup-head Uzumaki Eye from your spiral-eye engraving (1672x941): lid + a turning spiral iris (+ a blood twin) at every tier",
+    "eye-lashed": "the popup-head Inked eye from your eye sheet (680x680, the open eye with lashes): lid + iris at every tier",
+    "eye-veined": "the popup-head Veined eye from your eye cluster (1199x596, the big veined eyeball): lid + iris at every tier",
+    "ws-cult": "workspace family Cult Symbols (style `cult`), Silent Hill's symbols traced from skillunex.com/silent-hill-symbols and drawn per tier (no FILE): 1 Halo of the Sun, 2 Seal of Metatron, 3 Flauros, 4 Mark of Samael, 5 Valtiel, 6 Halo Sigil, 7 Otherworld Gate, 8 Faith & Torment, 9 Eternal Flame, 10 Sun's Vitality; workspaces/bar/<px>/ws-cult-<n>-<state>[.light].png, tiers 24-128, and the numeral-free picker card ws-cult-preview-active[.light].png",
+    "sprites": "from your sprite sheet (SHASSETS.png, 1920x1080, cut at its own resolution): menu marks pyramid-roundel / moth / eye-roundel / key, indicator versions hollow/bar/<px>/cassette-on|off (recording) and cup-on|off (stay awake), and sh/bar/<px>/key",
+    "pyramid-head": "from your Pyramid Head side view (pyramid-head-hd-side.png, 1254x1254, transparent ground, cut at its own resolution): workspace family `pyramid` (your workspace sheet's WS1 card: the figure in a targeting ring, his helmet's tip piercing it; grey ring when empty, red scratch bars when occupied, the ring and the inner face bleed when active, the whole figure floods when urgent) and the menu mark pyramid-head; both keep the picture's lighting and true blacks, written in theme tokens so they follow the current theme",
+    "ws-heather": "workspace family `heather` from your Heather / Pyramid roundel sheet (Heather pyramid.png, 1536x1024, her portrait cut at its own resolution, closer on her face under 40 px): your workspace sheet's WS2 card, her portrait in a targeting ring; grey ring when empty, red scratch bars when occupied, the ring bleeds when active, she is washed in blood when urgent; workspaces/bar/<px>/ws-heather-<n>-<state>[.light].png, tiers 24-128",
+}
+TOMIE_HD_SRC = (1500, 2000)                                          # the user's HD Tomie panel (class _TomieHD); the tomie / ws-tomie recipes take it as well as the Tommie drawing
+PHOTO_SRC = {"spiral": (282, 282), "tomie": (565, 933), "uzumaki-eye": (1672, 941), "beetle": (920, 920), "ws-beetle": (920, 920), "ws-tomie": (565, 933),
+             "mark-heather": (1536, 1024), "mark-pyramid": (1536, 1024), "ws-uzumaki-eye": None, "hollow-pack": (1536, 1024), "relic-sys": (1536, 1024), "ws-symbols": (1536, 1024), "relic-apps": (1536, 1024),
+             "eye-uzumaki": (1672, 941), "eye-lashed": (680, 680), "eye-veined": (1199, 596), "sprites": (1920, 1080), "ws-cult": None, "pyramid-head": (1254, 1254), "ws-heather": (1536, 1024)}
+CRISP_REPORT = ("beetle", "tomie", "ws-tomie", "ws-uzumaki-eye", "mark-pyramid", "mark-heather", "hollow-pack", "relic-sys", "ws-symbols", "sprites", "pyramid-head", "ws-heather")     # tonal art: `crisp` (share of full-strength pixels) is reported, not gated
+TONAL = {"crisp": 0.30, "fill": 0.80, "black": 0.05}     # the photo class of the S2c gate (line art keeps GATE)
+PHOTO_STATES = ("empty", "occupied", "active", "urgent")
+SERIF_BOLD = "/usr/share/fonts/noto/NotoSerif-Bold.ttf"
+
+
+def _p_area(m, W, H=None):
+    import numpy as np
+    from PIL import Image
+    H = H or W
+    return np.asarray(Image.fromarray((np.clip(m, 0, 1) * 65535).astype(np.uint16).astype(np.int32), "I")
+                      .resize((W, H), Image.BOX), np.float32) / 65535
+
+
+def _p_curve(a, lo, hi):
+    import numpy as np
+    t = np.clip((a - lo) / max(1e-3, hi - lo), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def _p_rgba(ink, blood):
+    """ink + blood coverage -> RGBA (ink 200 grey, blood 200/16/20), the recipe convention."""
+    import numpy as np
+    from PIL import Image
+    blood = np.clip(blood, 0, 1)
+    a = np.clip(ink, 0, 1) * (1 - blood)
+    h, w = a.shape
+    o = np.zeros((h, w, 4), np.float32)
+    al = np.clip(a + blood, 0, 1)
+    o[..., 3] = al
+    with np.errstate(invalid="ignore", divide="ignore"):
+        fb = np.where(al > 0, blood / np.maximum(al, 1e-6), 0)
+    o[..., 0] = (INK * (1 - fb) + 200 * fb) / 255
+    o[..., 1] = (INK * (1 - fb) + 16 * fb) / 255
+    o[..., 2] = (INK * (1 - fb) + 20 * fb) / 255
+    return Image.fromarray((np.clip(o, 0, 1) * 255).astype(np.uint8), "RGBA")
+
+
+def _p_figure(L, seal=4, thr=0.6):
+    """the inside of a black-on-white drawing: whatever the border cannot reach through paper."""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    dark = (L < thr).astype(np.uint8) * 255
+    sealed = np.asarray(Image.fromarray(dark).filter(ImageFilter.MaxFilter(2 * seal + 1)))
+    paper = np.where(sealed > 0, 0, 255).astype(np.uint8)
+    img = Image.fromarray(np.pad(paper, 2, constant_values=255)).copy()
+    ImageDraw.floodfill(img, (0, 0), 128, thresh=0)
+    outside = np.asarray(img)[2:-2, 2:-2] == 128
+    o = np.asarray(Image.fromarray((outside * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(2 * seal - 1))) > 0
+    return ~o
+
+
+class _Tomie:
+    MOLE = (371, 323, 4.5)
+    CROPS = {"head": (55, 0, 430), "face": (150, 92, 272), "eye": (262, 168, 184)}   # S2c fix: the head (hair + both faces) at EVERY tier
+    PAPER_DARK = 0.85
+
+    def __init__(self, im):
+        self.L = _lum(im)
+        self.FIG = _p_figure(self.L, 3, 0.6)
+
+    def coverage(self, crop, light, px):
+        import numpy as np
+        x, y, s = self.CROPS[crop]
+        m = self.MOLE
+        mr = max(m[2], 0.9 * s / px)                    # the mole stays >= 1.8 px wide at the target
+        l = self.L[y:y + s, x:x + s]
+        f = self.FIG[y:y + s, x:x + s]
+        yy, xx = np.mgrid[0:s, 0:s] + np.array([y, x])[:, None, None]
+        mole = np.clip(mr + 0.5 - np.hypot(xx - m[0], yy - m[1]), 0, 1) * ((l < 0.5) | (mr > m[2]))
+        ink = np.clip((0.80 - l) / 0.6, 0, 1) * f if light else np.clip((l - 0.30) / 0.55, 0, 1) * f
+        return ink * (1 - mole), mole
+
+    def crop_for(self, px):
+        return "head"
+
+    def mark(self, px, light=False):
+        import numpy as np
+        from PIL import Image
+        crop = self.crop_for(px)
+        ink, blood = self.coverage(crop, light, px)
+        s = ink.shape[0]
+        yy, xx = np.mgrid[0:s, 0:s]
+        d = np.hypot(xx - (s - 1) / 2, yy - (s - 1) / 2)
+        edge = np.clip((s / 2 - d) / (s / px), 0, 1)
+        if crop == "head":                                # the head keeps its own silhouette; only the bottom fades out
+            edge = np.clip((s - 1 - yy) / (0.10 * s), 0, 1)
+        a, b = _p_area(ink * edge, px), _p_area(blood * edge, px)
+        if px < 40:                                       # threshold-at-size: tones resolve to paper or ink
+            a, b = _p_curve(a, 0.22, 0.70), _p_curve(b, 0.15, 0.6)
+        elif px < 128:
+            a = _p_curve(a, 0.10, 0.85)
+        im = _p_rgba(a, b)
+        if light:
+            return im
+        arr = np.asarray(im).copy()                       # dark themes: the paper at 72 % of the bone token (no glare), blood untouched
+        red = arr[..., 0].astype(int) - arr[..., 1] > 60
+        arr[..., :3] = np.where(red[..., None], arr[..., :3], (arr[..., :3] * self.PAPER_DARK).astype(np.uint8))
+        return Image.fromarray(arr, "RGBA")
+
+
+class _UzEye:
+    CORE = (850.0, 482.0, 16.0)
+
+    def __init__(self, im):
+        import numpy as np
+        from PIL import Image, ImageFilter
+        self.L = _lum(im)
+        m = Image.fromarray(((self.L > 0.10) * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(15)).filter(ImageFilter.MinFilter(9)).filter(ImageFilter.GaussianBlur(3))
+        self.EYEMASK = np.asarray(m, np.float32) / 255
+        self.LV = np.clip((self.L - 0.06) / 0.80, 0, 1)
+        H, W = self.L.shape
+        self.YY, self.XX = np.mgrid[0:H, 0:W]
+
+    def mark(self, px, light=False):
+        import numpy as np
+        cx, cy, side = 836.0, 462.0, 900.0     # tight on the eye (bbox 231-1417 x 139-785): it fills the tile, outer lash tips run off
+        x0, y0 = cx - side / 2, cy - side / 2
+        box = (int(round(x0)), int(round(y0)), int(round(x0 + side)), int(round(y0 + side)))
+        k = side / px
+        pad = lambda m: np.pad(m, 1200)[box[1] + 1200:box[3] + 1200, box[0] + 1200:box[2] + 1200]
+        core_r = max(self.CORE[2], 0.85 * k)               # the blood core stays >= 1.7 px wide at the target
+        core = np.clip(core_r + 0.5 - np.hypot(self.XX - self.CORE[0], self.YY - self.CORE[1]), 0, 1)
+        ink = (1 - self.LV) * 0.92 * self.EYEMASK if light else self.LV * self.EYEMASK
+        ink = ink * (1 - core)
+        a, b = _p_area(pad(ink), px), _p_area(pad(core), px)
+        if px < 40:
+            a = _p_curve(a, 0.18, 0.75)
+        elif px < 128:
+            a = _p_curve(a, 0.08, 0.90)
+        return _p_rgba(a, _p_curve(b, 0.12, 0.55))
+
+
+class _Beetle:
+    SEAL = (698, 212, 756, 298)
+    IRIS = (459, 549, 8.5, 17.5)
+    BBOX = (29, 148, 890, 771)
+    CX = 459.5
+    WING_TONE = 0.42
+
+    def __init__(self, im):
+        import numpy as np
+        from PIL import ImageDraw
+        im = im.copy()
+        ImageDraw.Draw(im).rectangle(self.SEAL, fill=(255, 255, 255))
+        L = _lum(im)
+        self.FIG = _p_figure(L, 4, 0.6)
+        ink = np.clip((0.80 - L) / 0.6, 0, 1) * self.FIG
+        yy, xx = np.mgrid[0:920, 0:920]
+        self.rr = np.hypot(xx - self.IRIS[0], yy - self.IRIS[1])
+        self.BLOOD = ink * (self.rr >= self.IRIS[2] - 1) * (self.rr <= self.IRIS[3] + 1)
+        self.INK = ink * (1 - self.BLOOD)
+
+    def _edge(self, kk):
+        from PIL import Image, ImageFilter
+        import numpy as np
+        r = max(1, int(round(0.5 * kk)))
+        cache = self.__dict__.setdefault("_edges", {})
+        if r in cache:
+            return cache[r]
+        fig = (self.FIG * 255).astype(np.uint8)
+        er = np.asarray(Image.fromarray(fig).filter(ImageFilter.MinFilter(2 * r + 1)))
+        cache[r] = (fig.astype(np.float32) - er) / 255
+        return cache[r]
+
+    def parts(self, px, light, h_px=None):
+        key = (px, light, h_px)
+        memo = self.__dict__.setdefault("_pmemo", {})
+        if key not in memo:
+            memo[key] = self._parts(px, light, h_px)
+        return memo[key]
+
+    def _parts(self, px, light, h_px=None):
+        """v9 (lab/v9/beetle9.py): dark = the drawing's PAPER is bone (wings bone with dark veins), its black body is ink, a bone outline
+        closes the silhouette; light = the drawing's ink is the ink token, wings a faint film + outline. Tones resolve to two levels."""
+        import numpy as np
+        over = 1.15 if px < 40 else 1.08 if px < 64 else 1.0
+        B = self.BBOX
+        W, H = B[2] - B[0], B[3] - B[1]
+        h_px = h_px or px
+        k = min((px - 1.0) * over / W, (h_px - 1.0) / H)
+        sw, sh = px / k, h_px / k
+        cy = (B[1] + B[3]) / 2
+        w, h = int(round(sw)), int(round(sh))
+        x0, y0 = int(round(self.CX - w / 2)), int(round(cy - h / 2))
+        b = (x0, y0, x0 + w, y0 + h)
+        pad_img = lambda m: np.pad(m, 1000)[b[1] + 1000:b[3] + 1000, b[0] + 1000:b[2] + 1000]
+        kk = 1 / k
+        edge = self._edge(kk)
+        paper = self.FIG.astype(np.float32) * (1 - np.clip(self.INK + self.BLOOD, 0, 1))
+        eye = np.clip((max(self.IRIS[3], 0.95 * kk) if px < 40 else self.IRIS[3]) + 0.5 - self.rr, 0, 1) if px < 40 else self.BLOOD
+        A_ink, A_pap, A_edge, A_fig, A_eye = (_p_area(pad_img(m), px, h_px) for m in (self.INK, paper, edge, self.FIG.astype(np.float32), eye))
+        lo, hi = (0.25, 0.60) if px < 40 else (0.12, 0.75) if px < 128 else (0.0, 1.0)
+        cv = (lambda a: _p_curve(a, lo, hi)) if px < 128 else (lambda a: a)
+        if not light:
+            a = np.maximum(cv(A_pap), _p_curve(A_edge, 0.2, 0.55) if px < 128 else A_edge)
+        else:
+            a = np.maximum(cv(A_ink), _p_curve(A_edge, 0.2, 0.55) if px < 128 else A_edge)
+            if px < 128:
+                a = np.maximum(a, 0.22 * _p_curve(A_fig, 0.3, 0.7))
+        return a, (_p_curve(A_eye, 0.10, 0.55) if px < 128 else A_eye)
+
+    def mark(self, px, light=False):
+        a, eye = self.parts(px, light)
+        return _p_rgba(a, eye)
+
+    # the workspace family: the beetle in the top strip, a Mayan numeral under it (dot = 1, bar = 5), whole device px
+    @staticmethod
+    def layout(px):
+        d = max(2, int(round(px * 0.075)))            # dot / bar thickness: 2 @24-32, 3 @40-48, 4 @56+
+        g = 1 if px < 48 else 2
+        return d, g, 2 * d + g + 1
+
+    def mayan(self, n, px):
+        import numpy as np
+        from PIL import Image, ImageDraw
+        if _numeral_off():
+            return np.zeros((px, px), np.float32)
+        d, g, nz = self.layout(px)
+        SS = 8
+        m = Image.new("L", (px * SS, px * SS), 0)
+        dr = ImageDraw.Draw(m)
+        bars, dots = (2, 0) if n == 10 else (n // 5, n % 5)
+        span = 4 * d + 3 * g
+        x0 = (px - span) // 2
+        rows = ["bar"] * bars + (["dots"] if dots else [])
+        y = px - d
+        for r in rows:                                # the bottom row first: the dots ride on the bars
+            if r == "bar":
+                dr.rectangle((x0 * SS, y * SS, (x0 + span) * SS - 1, (y + d) * SS - 1), fill=255)
+            else:
+                w = dots * d + (dots - 1) * g
+                xs = (px - w) // 2
+                for i in range(dots):
+                    xx = xs + i * (d + g)
+                    if px < 40:
+                        dr.rectangle((xx * SS, y * SS, (xx + d) * SS - 1, (y + d) * SS - 1), fill=255)
+                    else:
+                        dr.ellipse((xx * SS, y * SS, (xx + d) * SS - 1, (y + d) * SS - 1), fill=255)
+            y -= d + g
+        return np.asarray(m.resize((px, px), Image.BOX), np.float32) / 255
+
+    def ws(self, n, state, px, light=False):
+        import numpy as np
+        d, g, nz = self.layout(px)
+        bh = px - nz
+        a, eye = self.parts(px, light, h_px=bh)
+        A = np.zeros((px, px), np.float32)
+        E = np.zeros_like(A)
+        A[:bh], E[:bh] = a, eye
+        N = self.mayan(n, px)
+        z = np.zeros_like(A)
+        if state == "empty":
+            ink, blood = np.maximum(np.maximum(A, E) * 0.55, N * 0.7), z
+        elif state == "occupied":
+            ink, blood = np.maximum(np.maximum(A, E), N), z
+        elif state == "active":
+            ink, blood = A, np.maximum(E, N)
+        else:
+            ink, blood = z, np.maximum(np.maximum(A, E), N)
+        return _p_rgba(ink, blood)
+
+
+# ---- S14: the eye recipes (ports of lab/v9/s14/eyes14.py and lab/v4/eyes5.py) ---------------------------------------------------------
+# crop box in source px, the iris (centre x, y, radius) and its feather, the almond mask (cx, cy, rx, ry in crop px) of the cluster
+_EYE_GEO = {
+    "uzumaki": dict(box=(255, 160, 1384, 749), iris=(848, 492, 195), feather=6),
+    "lashed": dict(box=(22, 392, 200, 492), iris=(112, 440, 26), feather=2),
+    "veined": dict(box=(150, 205, 560, 490), iris=(353, 348, 30), feather=2, mask=(198, 140, 200, 128)),
+}
+
+
+def _eye_alpha(eid, L, light):
+    """(alpha 0..1 over the crop, the iris disc mask 0..1) for the polarity (light = ink polarity, for light themes)."""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    g = _EYE_GEO[eid]
+    x0, y0, x1, y1 = g["box"]
+    crop = L[y0:y1, x0:x1].copy()
+    h, w = crop.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    ix, iy, ir = g["iris"][0] - x0, g["iris"][1] - y0, g["iris"][2]
+    if eid == "uzumaki":
+        if light:       # ink polarity inside the eye's own silhouette (lashes included)
+            fig = np.asarray(Image.fromarray((crop * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(6)), np.float32) / 255 > 0.10
+            fig = np.asarray(Image.fromarray((fig * 255).astype(np.uint8)).filter(ImageFilter.MinFilter(9)), np.float32) / 255
+            a = np.clip((0.62 - crop) / 0.50, 0, 1) * fig
+        else:
+            a = np.clip((crop - 0.06) / 0.86, 0, 1)
+    else:
+        if light:
+            a = np.clip((0.80 - crop) / 0.6, 0, 1)
+        else:           # the paper reachable from the crop's border is ground, not eye
+            a = np.clip((crop - 0.30) / 0.6, 0, 1)
+            dark = (crop < 0.6).astype(np.uint8) * 255
+            sealed = np.asarray(Image.fromarray(dark).filter(ImageFilter.MaxFilter(5)))
+            img = Image.fromarray(np.pad(np.where(sealed > 0, 0, 255).astype(np.uint8), 2, constant_values=255)).copy()
+            ImageDraw.floodfill(img, (0, 0), 128)
+            out_ = np.asarray(img)[2:-2, 2:-2] == 128
+            out_ = np.asarray(Image.fromarray((out_ * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(3))) > 0
+            a[out_] = 0
+        if "mask" in g:
+            mx, my, rx, ry = g["mask"]
+            q = np.sqrt(((xx - mx) / rx) ** 2 + ((yy - my) / ry) ** 2)
+            a = a * np.clip((1.0 - q) / 0.06, 0, 1)
+    disc = np.clip((ir - np.hypot(xx - ix, yy - iy)) / g["feather"], 0, 1)
+    return a, disc
+
+
+def make_eye(eid, src):
+    """[(rel, PIL RGBA)] of one eye recipe: lid, iris (and hot for the Uzumaki eye), both polarities, the master and every tier. Pure."""
+    import numpy as np
+    from PIL import Image
+    L = _lum(src)
+    outl = []
+    for light in (False, True):
+        a, disc = _eye_alpha(eid, L, light)
+        layers = {"lid": a * (1 - disc), "iris": a * disc}
+        if eid == "uzumaki":    # the spiral runs blood (the hot state): the iris, a little inside its rim; dark polarity a touch quieter
+            h, w = a.shape
+            yy, xx = np.mgrid[0:h, 0:w]
+            ix, iy, ir = _EYE_GEO[eid]["iris"][0] - _EYE_GEO[eid]["box"][0], _EYE_GEO[eid]["iris"][1] - _EYE_GEO[eid]["box"][1], _EYE_GEO[eid]["iris"][2]
+            layers["hot"] = a * np.clip((ir - 8 - np.hypot(xx - ix, yy - iy)) / 10, 0, 1) * (1.0 if light else 0.85)
+        for name, m in layers.items():
+            for H in (0,) + EYE_TIERS:
+                W, Hh = eye_size(eid, H)
+                small = _p_area(m, W, Hh)
+                rel = f"eyes/{eid}/" + (f"h{H}/" if H else "") + name + (".light" if light else "") + ".png"
+                outl.append((rel, _p_rgba(small * 0 if name == "hot" else small, small if name == "hot" else small * 0)))
+    return outl
+
+
+# ---- S15a: the v10 DEFINITION pipeline (lab/v10/def10.py ported; markDef v10). Real art only: crop, tone, local contrast, resample, clean-up. ----
+# Per mark: 1 local contrast at source scale (an unsharp mask whose radius is ONE target px), 2 tone curve, 3 area (BOX) resample, 4 target sharpen,
+# 5 threshold-at-size, 6 clean-up of islands / pinholes, 7 optical fill. The blood accent keeps its floor (>= 1.8 px) and is never sharpened.
+# The files are written as `<name>.v10{,.light}.png` beside the v9 ones; the shell picks them with `markDef v10` (default v9 = today's files).
+def _d_gblur(m, sig):
+    import numpy as np
+    if sig <= 0.05:
+        return m.astype(np.float32)
+    r = max(1, int(3 * sig + 0.5)); x = np.arange(-r, r + 1); k = np.exp(-x * x / (2 * sig * sig)); k /= k.sum()
+    p = np.pad(m.astype(np.float32), r, mode="reflect")
+    h = sum(k[i] * p[:, i:i + p.shape[1] - 2 * r] for i in range(2 * r + 1))
+    return sum(k[i] * h[i:i + h.shape[0] - 2 * r, :] for i in range(2 * r + 1))
+
+
+def _d_usm(m, sig, amt):
+    return m + amt * (m - _d_gblur(m, sig))
+
+
+def _d_cleanup(a, thr_island=0.55):
+    import numpy as np
+    h, w = a.shape; p = np.pad(a, 1)
+    nb = np.stack([p[1 + dy:h + 1 + dy, 1 + dx:w + 1 + dx] for dy in (-1, 0, 1) for dx in (-1, 0, 1) if (dy, dx) != (0, 0)])
+    on = nb > 0.35
+    iso = (a > 0) & (on.sum(0) == 0) & (a < thr_island)
+    a = np.where(iso, 0, a)
+    pin = (a < 0.35) & ((nb > 0.7).sum(0) >= 7)
+    return np.where(pin, nb.mean(0), a)
+
+
+def _d_finish(a, px, s2=0.45, t=(0.22, 0.66)):
+    import numpy as np
+    a = np.clip(_d_usm(a, 0.55, s2), 0, 1) if s2 else a
+    if px < 48:
+        a = _p_curve(a, *t)
+    elif px < 128:
+        a = _p_curve(a, 0.06, 0.88)
+    return _d_cleanup(a) if px < 64 else a
+
+
+def _d_win(m, cx, cy, sw, sh):
+    import numpy as np
+    x0, y0 = int(round(cx - sw / 2)), int(round(cy - sh / 2)); P = 1400
+    return np.pad(m, P)[y0 + P:y0 + P + int(round(sh)), x0 + P:x0 + P + int(round(sw))]
+
+
+def _d_disc(cx, cy, r, shape):
+    import numpy as np
+    yy, xx = np.mgrid[0:shape[0], 0:shape[1]]
+    return np.clip(r + 0.5 - np.hypot(xx - cx, yy - cy), 0, 1)
+
+
+def _d_uzeye(U, px, light=False):
+    """Uzumaki Eye: the eye fills the width (window side 930); the lid line and the iris rim are lifted by the source-scale USM."""
+    import numpy as np
+    h_px = px; side = 930.0; sw, sh = side, side * h_px / px; k = side / px
+    cx, cy = 838.0, 466.0
+    L = _d_win(U.L, cx, cy, sw, sh); M = _d_win(U.EYEMASK, cx, cy, sw, sh)
+    L = np.clip(_d_usm(L, 1.0 * k, 1.1), 0, 1)
+    core_r = max(U.CORE[2], 0.95 * k)
+    core = _d_disc(U.CORE[0] - (cx - sw / 2), U.CORE[1] - (cy - sh / 2), core_r, L.shape)
+    lv = np.clip((L - 0.07) / 0.72, 0, 1)
+    cov = (1 - lv) ** 0.9 * 0.95 * M if light else lv ** 0.85 * M
+    cov = cov * (1 - core)
+    a, b = _p_area(cov, px, h_px), _p_area(core, px, h_px)
+    a = _d_finish(a, px, 0.55, (0.18, 0.70)); b = _p_curve(b, 0.12, 0.55)
+    return _p_rgba(a, b)
+
+
+# ---- S15b: the v10 workspace sets (lab/v10/ws10.py ported). Tomie from the user's Tommie drawing, Beetle's strip = the three-level read ----
+WS_CROPS = {"gaze": (348, 286, 150), "bulge": (212, 300, 118)}      # the fringe's tips over her eye + the mole / the second face's bulging eye
+WS_PUPIL = (221, 287, 4.0)
+
+
+def _numeral_off():
+    """True inside ito_sh.no_numeral(): the picker preview of a family is drawn without its numeral (the bar tiles keep theirs)."""
+    sh = sys.modules.get("ito_sh")
+    return sh is not None and sh.NUMERAL_OFF[0]
+
+
+def _w_numeral(n, px):
+    """(digit coverage, moat) of the Noto Serif Bold numeral, bottom-left on whole device px (her cheek; the mole is bottom-right)."""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    if _numeral_off():
+        return np.zeros((px, px), np.float32), np.zeros((px, px), np.float32)
+    SS = 8
+    h = max(8, int(round(0.40 * px)) if px <= 32 else int(round(12.8 + 0.18 * (px - 32))))
+    m = Image.new("L", (px * SS, px * SS), 0); dr = ImageDraw.Draw(m)
+    f = ImageFont.truetype(SERIF_BOLD, int(h * SS * 1.36)); t = str(n)
+    bb = dr.textbbox((0, 0), t, font=f); w = bb[2] - bb[0]; hh = bb[3] - bb[1]
+    sx = 0.86 if n == 10 else 1.0
+    tmp = Image.new("L", (w + 4, hh + 4), 0); ImageDraw.Draw(tmp).text((2 - bb[0], 2 - bb[1]), t, font=f, fill=255)
+    tmp = tmp.resize((max(1, int(w * sx)), int(h * SS)), Image.LANCZOS)
+    m.paste(tmp, (1 * SS, px * SS - tmp.height - 1 * SS))
+    d = _p_curve(np.asarray(m.resize((px, px), Image.BOX), np.float32) / 255, 0.18, 0.62)
+    moat = np.asarray(Image.fromarray((d * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(3)), np.float32) / 255
+    return d, moat
+
+
+# ---- v11: the Tomie mark and workspaces from BOTH faces / each half of her face (user decision; the older head-crop family `tomie-head` was removed in the HD pass) ----
+# Real art only: boxes of the user's Tommie drawing, made square by padding (the padding is transparent, never a cut through a face).
+TOMIE_STICKER_BOX = (45, 20, 500, 430)                              # S19c: the die-cut sticker takes the whole head (hair tuft, left cheek, long hair), so the silhouette is hers and not the crop's; (75, 120, 430, 415) inside the figure only gives a rectangle
+WS11_BOX = {"fair": (275, 215, 425, 365), "melt": (100, 225, 250, 375)}     # the human side (eye + mole + fringe) / the transformed side (second eye + lips)
+WS11_PUPIL = (221, 287, 5.0)                                         # the transformed side's bulging eye
+
+
+def _t11_maps(T, px, box, light, accent, mask_fig=False):
+    """(ink, accent) coverage of `box` of the drawing, square-padded, at `px`. accent = (cx, cy, r) in source px, or None."""
+    import numpy as np
+    x0, y0, x1, y1 = box
+    w, h = x1 - x0, y1 - y0
+    s = max(w, h); cx, cy = (x0 + x1) / 2, (y0 + y1) / 2; k = s / px
+    L = _d_win(T.L, cx, cy, s, s); F = _d_win(T.FIG.astype(np.float32), cx, cy, s, s)
+    ox, oy = cx - s / 2, cy - s / 2
+    yy, xx = np.mgrid[0:L.shape[0], 0:L.shape[1]]
+    inside = ((xx + ox >= x0) & (xx + ox < x1) & (yy + oy >= y0) & (yy + oy < y1)).astype(np.float32)
+    L0 = L
+    L = np.clip(_d_usm(L, 0.9 * k, 0.9), 0, 1)
+    if light:
+        cov = np.clip((0.78 - L) / 0.55, 0, 1) ** 0.85 * F
+    else:
+        cov = np.clip((L - 0.34) / 0.48, 0, 1) ** 1.15 * F
+    cov = cov * inside
+    acc = np.zeros_like(cov)
+    if accent:
+        r = max(accent[2], 0.95 * k)
+        acc = _d_disc(accent[0] - ox, accent[1] - oy, r, L.shape) * (((L < 0.55) | (r > accent[2])) & (inside > 0))
+        cov = cov * (1 - acc)
+    a = _d_finish(_p_area(cov, px), px, 0.5, (0.26, 0.64)); b = _p_curve(_p_area(acc, px), 0.15, 0.55)
+    if px <= TOMIE_HC_MAX:
+        a, b = _t_hc(L0, F * inside, acc, light, px, mask_fig)
+    return a, b
+
+
+def _d_tomie_sticker(T, px, light=False, box=None):
+    """S19c: the Tomie mark as a DIE-CUT STICKER of the real drawing: no tile, no rim rectangle, transparent everywhere outside the figure.
+    The silhouette is the figure mask of the drawing (the white page flood-filled from the borders, `_p_figure`; small leaks closed) cut by `box`
+    (TOMIE_STICKER_BOX, padded to a square). Inside it the drawing in two theme tokens: dark twin = paper bone (lum 200) + ink (lum 0, the theme ground);
+    light twin = the roles inverted (paper 0 = the light ground, ink 200 = the dark foreground). A thin outline in the paper token (dark twin) / the ink
+    token (light twin) closes the silhouette, so the hair shape reads on the bar: 1 px up to 36, 1.5 px up to 128, proportional above. The mole stays blood.
+    Drawing recipe as the old tile (Lanczos to 8x, curve (a - 0.12) / 0.62, MinFilter 3 up to 36, BOX down); the silhouette is smoothed at 8x and the
+    outline is the silhouette grown by a blur + threshold, all premultiplied before the BOX down."""
+    import numpy as np
+    from PIL import Image, ImageFilter
+    x0, y0, x1, y1 = box or getattr(T, "STICKER_BOX", TOMIE_STICKER_BOX)
+    s0 = max(x1 - x0, y1 - y0); cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    ow = 1.0 if px <= 36 else 1.5 if px <= 128 else 1.5 * px / 128      # outline width, device px
+    s = s0 * px / (px - 2 * (ow + 0.5))                                 # window side in source px: room for the outline all round
+    L = _d_win(T.L, cx, cy, s, s)
+    F = _d_win(T.FIG.astype(np.float32), cx, cy, s, s)
+    ox, oy = cx - s / 2, cy - s / 2
+    yy, xx = np.mgrid[0:L.shape[0], 0:L.shape[1]]
+    inside = (xx + ox >= x0) & (xx + ox < x1) & (yy + oy >= y0) & (yy + oy < y1)
+    SS = 8 if px <= 128 else 2
+    S = px * SS
+    fi = Image.fromarray((F * 255 + 0.5).astype(np.uint8)).filter(ImageFilter.MaxFilter(7)).filter(ImageFilter.MinFilter(7))      # close the leaks of the mask
+    fi = Image.fromarray((np.asarray(fi, np.float32) * inside).astype(np.uint8)).resize((S, S), Image.BICUBIC).filter(ImageFilter.GaussianBlur(0.6 * SS * px / max(1, s)))
+    M = fi.point(lambda v: 255 if v > 127 else 0)                       # the silhouette at SS x
+    sg = ow * SS / 1.2816                                               # blur + threshold 0.1 grows the shape by 1.28 sigma = the outline width
+    Mo = M.filter(ImageFilter.GaussianBlur(sg)).point(lambda v: 255 if v > 25 else 0)
+    g = Image.fromarray((np.clip(np.where(inside, L, 1.0), 0, 1) * 255 + 0.5).astype(np.uint8)).resize((S, S), Image.LANCZOS)
+    gi = Image.fromarray((np.clip((np.asarray(g, np.float32) / 255 - 0.12) / 0.62, 0, 1) * 255 + 0.5).astype(np.uint8))
+    if px <= 36:
+        gi = gi.filter(ImageFilter.MinFilter(3))
+    paper = np.asarray(gi, np.float32) / 255                            # 1 = paper, 0 = ink
+    sil = np.asarray(M, np.float32) / 255; grown = np.asarray(Mo, np.float32) / 255
+    ink = np.where(sil > 0, 1 - paper, 1.0 if light else 0.0)           # outside the silhouette (the ring): the paper token (dark) / the ink token (light)
+    A = _p_area(grown, px)
+    C = _p_area(ink * grown, px) / np.maximum(A, 1e-6)
+    m = T.MOLE; k = s / px; mr = max(m[2], 0.95 * k)
+    acc = _d_disc(m[0] - ox, m[1] - oy, mr, L.shape) * ((L < 0.55) | (mr > m[2])) * inside
+    b = _p_curve(_p_area(acc, px), 0.15, 0.55)
+    g8 = INK * C if light else INK * (1 - C)
+    o = np.zeros((px, px, 4), np.float32)
+    o[..., 0] = g8 * (1 - b) + 200 * b; o[..., 1] = g8 * (1 - b) + 16 * b; o[..., 2] = g8 * (1 - b) + 20 * b
+    o[..., 3] = np.maximum(A, b) * 255
+    return Image.fromarray(np.clip(o + 0.5, 0, 255).astype(np.uint8), "RGBA")
+
+
+TOMIE12_CIRCLE = (230, 305, 180)                                    # centre x, y and radius in source px: the transformed face (second eye, lips) fills the left, the human eye + mole stay in
+
+
+TOMIE_HC_MAX = 56      # up to this tier the Tomie faces are drawn for maximum contrast (full paper, line-weight floor); above it the original tonal render
+
+
+def _t_hc(L, F, acc, light, px, mask_fig=False):
+    """S17 high-contrast Tomie below 57 px (the orchestrator's verified badge recipe, lab/v11/tomie_badge.py, ported): the square grey window of the drawing is
+    resampled (Lanczos) to 8x the tier, the contrast curve (a - 0.12) / 0.62 makes the paper full strength, a MinFilter (3 px on the 8x canvas) thickens every ink line to at least a whole device pixel, and a BOX resample brings it to the tier. Dark themes: the paper is the
+    bone token at full strength and the ink is clear (the ground shows, never an opaque black); the light twin swaps the roles (ink lines in the ink token on
+    clear paper). The accent (mole / pupil) is kept apart, as before. -> (a, b) coverage."""
+    import numpy as np
+    from PIL import Image, ImageFilter
+    S = px * 8
+    g = Image.fromarray((np.clip(L, 0, 1) * 255 + 0.5).astype(np.uint8)).resize((S, S), Image.LANCZOS)
+    a = np.clip((np.asarray(g, np.float32) / 255 - 0.12) / 0.62, 0, 1)
+    # the verified recipe thickens with 7 / 5 / 3 px at <= 32 / <= 48 / above; lab/s17/tomie-kernels.png shows 7 and 5 eat the paper into mush at 26-36 (the left face is lost),
+    # so the 3 px kernel is used at every tier <= 56 (deviation from the recipe, reported)
+    gi = Image.fromarray((a * 255 + 0.5).astype(np.uint8)).filter(ImageFilter.MinFilter(3)).resize((px, px), Image.BOX)
+    paper = np.asarray(gi, np.float32) / 255
+    acc_px = _p_area(acc, px)
+    a = (1 - paper) if light else paper
+    if mask_fig:                                      # the mark: only inside the figure and the box (the workspaces keep the full window)
+        fa = _p_curve(_p_area(F, px), 0.30, 0.70)
+        a = a * fa if light else np.maximum(a * fa, 0.24 * fa)      # dark: her black hair is a faint bone tone, so the head and the fringe read as a shape
+    return a * (1 - np.clip(acc_px * 2, 0, 1)), _p_curve(acc_px, 0.15, 0.55)
+
+
+def _w_tomie11(T, n, st, px, light, memo):
+    """v11 workspace: the human side while empty/occupied, the transformed side when active, that side in blood when urgent."""
+    import numpy as np
+    from PIL import Image
+    half = "fair" if st in ("empty", "occupied") else "melt"
+    key = (px, half, light)
+    if key not in memo:
+        memo[key] = _t11_maps(T, px, getattr(T, "WS11_BOX", WS11_BOX)[half], light, T.MOLE if half == "fair" else getattr(T, "WS11_PUPIL", WS11_PUPIL))
+    a, b = memo[key]
+    N, moat = _w_numeral(n, px)
+    a = a * (1 - moat); b = b * (1 - moat)
+    z = 0 * a
+    if st == "empty":      ink, blood = np.maximum(a * 0.45, N * 0.70), b * 0.45
+    elif st == "occupied": ink, blood = np.maximum(a, N), b
+    elif st == "active":   ink, blood = np.maximum(a, N), b
+    else:                  ink, blood = np.maximum(b, N), a        # the transformed side's lines in blood, its eye and the numeral in bone
+    im = _p_rgba(ink, blood)
+    if not light and st != "urgent" and px > TOMIE_HC_MAX:
+        arr = np.asarray(im).copy(); red = arr[..., 0].astype(int) - arr[..., 1] > 60
+        arr[..., :3] = np.where(red[..., None], arr[..., :3], (arr[..., :3] * 0.85).astype(np.uint8)); im = Image.fromarray(arr, "RGBA")
+    return im
+
+
+WS12_CIRCLE = (172, 300, 80)                                        # the transformed face: second eye + lips inside a circle (active / urgent)
+
+
+def _t12_maps(T, px, light):
+    """(ink, accent, rim) of the transformed face inside the circle `WS12_CIRCLE`, at `px`: transparent outside the rim, no ground."""
+    import numpy as np
+    cx, cy, r = getattr(T, "WS12_CIRCLE", WS12_CIRCLE); s = 2 * r; k = s / px
+    pupil = getattr(T, "WS11_PUPIL", WS11_PUPIL)
+    L = _d_win(T.L, cx, cy, s, s); F = _d_win(T.FIG.astype(np.float32), cx, cy, s, s); ox, oy = cx - r, cy - r
+    L0 = L
+    L = np.clip(_d_usm(L, 0.9 * k, 0.9), 0, 1)
+    cov = (np.clip((0.78 - L) / 0.55, 0, 1) ** 0.85 if light else np.clip((L - 0.34) / 0.48, 0, 1) ** 1.15) * F
+    acr = max(pupil[2], 0.95 * k)
+    acc = _d_disc(pupil[0] - ox, pupil[1] - oy, acr, L.shape) * ((L < 0.55) | (acr > pupil[2]))
+    cov = cov * (1 - acc)
+    a = _d_finish(_p_area(cov, px), px, 0.5, (0.26, 0.64)); b = _p_curve(_p_area(acc, px), 0.15, 0.55)
+    if px <= TOMIE_HC_MAX:
+        a, b = _t_hc(L0, F, acc, light, px)
+    yy, xx = np.mgrid[0:px, 0:px]; d = np.hypot(xx - (px - 1) / 2, yy - (px - 1) / 2); R = px / 2; w = max(1.0, 0.05 * px)
+    ring = np.clip(np.minimum(R - d, d - (R - w)) + 0.5, 0, 1); inner = np.clip(R - w - d + 0.5, 0, 1)
+    return np.maximum(a * inner, ring) * np.clip(R - d, 0, 1), b * inner, ring
+
+
+def _w_tomie12(T, n, st, px, light, memo, memo11):
+    """v12 workspace: the human side (square, as v11) while empty / occupied; the transformed face inside a circle when active, in blood when urgent."""
+    import numpy as np
+    from PIL import Image
+    if st in ("empty", "occupied"):
+        return _w_tomie11(T, n, st, px, light, memo11)
+    key = (px, light)
+    if key not in memo:
+        memo[key] = _t12_maps(T, px, light)
+    a, b, ring = memo[key]
+    N, moat = _w_numeral(n, px)
+    a = a * (1 - moat); b = b * (1 - moat)
+    ink, blood = (np.maximum(a, N), b) if st == "active" else (np.maximum(b, N), a)
+    im = _p_rgba(ink, blood)
+    if not light and st != "urgent" and px > TOMIE_HC_MAX:
+        arr = np.asarray(im).copy(); red = arr[..., 0].astype(int) - arr[..., 1] > 60
+        arr[..., :3] = np.where(red[..., None], arr[..., :3], (arr[..., :3] * 0.85).astype(np.uint8)); im = Image.fromarray(arr, "RGBA")
+    return im
+
+
+class _TomieHD(_Tomie):
+    """The user's HD Tomie (1500x2000: an ink drawing on paper, a black framed panel with a white halo; a signature under the frame).
+    Only the inside of the frame is read (`FRAME`: the paper margin and the signature never reach a product). The halo is flood-filled from
+    `HALO` (the dark ink sealed by 3 px so it cannot leak through her outline) and the spray outside it from the frame's sides: what is left
+    is her figure, put on white paper so the Tommie recipes (sticker, workspaces) work unchanged. The thin pen lines are thickened by a
+    3 px MinFilter (crisp ink at bar size). Every box below is in the frame's own pixels (1245x1520)."""
+    FRAME = (135, 255, 1380, 1775)
+    HALO = ((1000, 300), (1100, 1200), (100, 1300), (200, 250), (150, 700))
+    MOLE = (753, 601, 6.0)
+    STICKER_BOX = (255, 110, 915, 790)                               # the whole head: hair crown, both faces, the long hair, down to the chin
+    WS11_BOX = {"fair": (600, 440, 840, 680), "melt": (290, 420, 560, 690)}
+    WS11_PUPIL = (501, 550, 5.0)                                     # the second face's bulging eye
+    WS12_CIRCLE = (440, 570, 150)
+
+    def __init__(self, im):
+        import numpy as np
+        from PIL import Image, ImageDraw, ImageFilter
+        g = np.asarray(im.convert("L").crop(self.FRAME), np.float32) / 255
+        lo, hi = np.percentile(g, 3), np.percentile(g, 97)
+        L = np.clip((g - lo) / max(1e-3, hi - lo), 0, 1)
+
+        def grow(m, r):
+            return np.asarray(Image.fromarray(m.astype(np.uint8) * 255).filter(ImageFilter.MaxFilter(2 * r + 1))) > 0
+
+        def flood(mask, seeds):
+            img = Image.fromarray(np.where(mask, 255, 0).astype(np.uint8)).copy()
+            for xy in seeds:
+                if img.getpixel(xy) == 255:
+                    ImageDraw.floodfill(img, xy, 128, thresh=0)
+            return np.asarray(img) == 128
+
+        halo = grow(flood(~grow(L < 0.5, 3), self.HALO), 4)
+        h, w = L.shape
+        spray = flood(~halo, ((2, 2), (w - 3, 2), (2, h // 2), (w - 3, h // 2)))
+        fig = ~halo & ~spray
+        img = Image.fromarray(np.where(fig, 255, 0).astype(np.uint8)).copy()     # specks of paper left inside the spray: every piece under 2000 px goes
+        while True:
+            a = np.asarray(img)
+            i = int(np.argmax(a == 255))
+            if a.flat[i] != 255:
+                break
+            xy = (i % w, i // w)
+            ImageDraw.floodfill(img, xy, 100, thresh=0)
+            if int((np.asarray(img) == 100).sum()) >= 2000:
+                ImageDraw.floodfill(img, xy, 200, thresh=0)
+            else:
+                ImageDraw.floodfill(img, xy, 0, thresh=0)
+        self.FIG = np.asarray(img) == 200
+        thick = np.asarray(Image.fromarray((L * 255 + 0.5).astype(np.uint8)).filter(ImageFilter.MinFilter(3)), np.float32) / 255
+        self.L = np.where(self.FIG, thick, 1.0).astype(np.float32)
+
+
+def _tomie_of(src):
+    return _TomieHD(src) if src.size == TOMIE_HD_SRC else _Tomie(src)
+
+
+class _BeetleFix(_Beetle):
+    """S18 beetle (the orchestrator's verified recipe, lab/v11/beetle_fix.py): thin lines kept, NO dilation. The seal is erased, the drawing is cropped to
+    (0.03W, 0.14H, 0.97W, 0.86H), cut per tier with LANCZOS to 8x, ink = 1 - lum, curve clip((v - 0.10) / 0.7), BOX down to the tier, gain 1.15; alpha = the ink
+    coverage on a TRANSPARENT ground (the theme shader makes it the bone token on dark themes, the ink token on light ones). The abdomen eye is the blood accent."""
+    ERASE = (0.76, 0.22, 0.84, 0.33)
+    CROP = (0.03, 0.14, 0.97, 0.86)
+
+    def __init__(self, im):
+        import numpy as np
+        from PIL import Image, ImageDraw
+        W, H = im.size
+        im = im.convert("RGB").copy()
+        e = self.ERASE
+        ImageDraw.Draw(im).rectangle((int(e[0] * W), int(e[1] * H), int(e[2] * W), int(e[3] * H)), fill=(255, 255, 255))
+        c = self.CROP; self.box = (int(c[0] * W), int(c[1] * H), int(c[2] * W), int(c[3] * H))
+        self.crop = im.convert("L").crop(self.box)
+        self.eye = (self.IRIS[0] - self.box[0], self.IRIS[1] - self.box[1], self.IRIS[3])
+        self._memo = {}
+
+    def _strip(self, px, h):
+        """(ink, blood) coverage maps (h, px) of the beetle fitted whole (never cut) in a px x h cell, centred."""
+        key = (px, h)
+        if key in self._memo:
+            return self._memo[key]
+        import numpy as np
+        from PIL import Image
+        cw, ch = self.crop.size
+        s = min(px / cw, h / ch)
+        tw, th = max(1, int(round(cw * s))), max(1, int(round(ch * s)))
+        ss = 8 if px <= 128 else 2
+        g = np.asarray(self.crop.resize((tw * ss, th * ss), Image.LANCZOS), np.float32) / 255
+        ink = np.clip(((1 - g) - 0.10) / 0.7, 0, 1)
+        yy, xx = np.mgrid[0:th * ss, 0:tw * ss]
+        k = 1 / (s * ss)                                          # source px per 8x px
+        r = max(self.eye[2] + 1.0, 0.95 / s) if px < 40 else self.eye[2] + 1.0
+        m = np.clip(r * s * ss + 0.5 - np.hypot(xx - self.eye[0] * s * ss, yy - self.eye[1] * s * ss), 0, 1)
+        ink = np.maximum(ink, 0.9 * m)                            # the eye is a solid blood point at every tier
+        blood, rest = ink * m, ink * (1 - m)
+        down = lambda a: np.asarray(Image.fromarray(a.astype(np.float32), "F").resize((tw, th), Image.BOX))
+        A, B = np.clip(down(rest) * 1.15, 0, 1), np.clip(down(blood) * 1.15, 0, 1)
+        outA, outB = np.zeros((h, px), np.float32), np.zeros((h, px), np.float32)
+        x0, y0 = (px - tw) // 2, (h - th) // 2
+        outA[y0:y0 + th, x0:x0 + tw], outB[y0:y0 + th, x0:x0 + tw] = A, B
+        self._memo[key] = (outA, outB)
+        return self._memo[key]
+
+    def mark(self, px, light=False):
+        a, b = self._strip(px, px)
+        return _p_rgba(a, b)
+
+    def ws(self, n, state, px, light=False):
+        import numpy as np
+        d, g, nz = self.layout(px); bh = px - nz
+        a, e = self._strip(px, bh)
+        A = np.zeros((px, px), np.float32); E = np.zeros_like(A); A[:bh], E[:bh] = a, e
+        N = self.mayan(n, px); z = np.zeros_like(A)
+        if state == "empty":      ink, blood = np.maximum(np.maximum(A, E) * 0.55, N * 0.7), z
+        elif state == "occupied": ink, blood = np.maximum(np.maximum(A, E), N), z
+        elif state == "active":   ink, blood = A, np.maximum(E, N)
+        else:                     ink, blood = z, np.maximum(np.maximum(A, E), N)
+        return _p_rgba(ink, blood)
+
+
+# the Sheet spiral (system-normal.png, 282 px hand drawing): rebuilt from ITS OWN centreline (polar unwrap + least-squares Archimedean fit),
+# drawn per tier as a ribbon: < 48 w 1.45 -> 1.9 px, gap >= 2.0 / 2.4, <= 2.9 / 3.8 turns; >= 48 w 0.040 -> 0.058 x px, gap 0.055 x px, 3.4 turns.
+def _d_spiral_fit(src):
+    import math
+    import numpy as np
+    im = src.convert("RGBA"); fill = 0.93
+    al = np.asarray(im)[..., 3]; ys, xs = np.where(al > 8)
+    x0, x1, y0, y1 = xs.min(), xs.max() + 1, ys.min(), ys.max() + 1
+    side = int(math.ceil(max(x1 - x0, y1 - y0) / fill)); cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    box = (int(round(cx - side / 2)), int(round(cy - side / 2))); box = box + (box[0] + side, box[1] + side)
+    im = im.crop(box)
+    a = np.asarray(im, np.float32)[..., 3] / 255; s = a.shape[0]
+    ys, xs = np.nonzero(a > 0.7); w = a[ys, xs]
+    c0 = np.array([s / 2, s / 2])
+    for _ in range(3):
+        d = np.hypot(xs - c0[0], ys - c0[1]); m = d < 0.25 * s / 2
+        c0 = np.array([np.average(xs[m], weights=w[m]), np.average(ys[m], weights=w[m])])
+    N = 360; R = int(s / 2); pts = []; TAU = math.tau
+    for i in range(N):
+        th = i / N * TAU; rr = np.arange(2, R, 0.5)
+        x = c0[0] + rr * math.cos(th); y = c0[1] + rr * math.sin(th)
+        v = a[np.clip(y.astype(int), 0, s - 1), np.clip(x.astype(int), 0, s - 1)]
+        on = v > 0.7; edges = np.flatnonzero(np.diff(on.astype(int)) == 1)
+        for e in edges:
+            j = e + 1; k = j
+            while k < len(on) and on[k]:
+                k += 1
+            pts.append((th, rr[(j + k - 1) // 2]))
+    pts = np.array(pts)
+    best = None
+    pts = pts[pts[:, 1] < 0.40 * s]
+    for pitch in np.linspace(0.06 * s, 0.20 * s, 200):
+        b = pitch / TAU
+        for a0 in np.linspace(0, pitch, 32, endpoint=False):
+            k = np.round((pts[:, 1] - a0 - b * pts[:, 0]) / pitch)
+            res = pts[:, 1] - (a0 + b * (pts[:, 0] + TAU * k))
+            score = (np.abs(res) < 0.12 * pitch).mean()
+            if best is None or score > best[0]:
+                best = (score, a0, b, k)
+    err, a0, b, k = best
+    phi = pts[:, 0] + TAU * k; A = np.vstack([np.ones_like(phi), phi]).T
+    a0, b = np.linalg.lstsq(A, pts[:, 1], rcond=None)[0]
+    res = pts[:, 1] - (a0 + b * phi); ok = np.abs(res) < 0.5 * TAU * b
+    phi, res = phi[ok], res[ok]
+    M = np.column_stack([f(h * pts[ok, 0]) for h in range(1, 7) for f in (np.cos, np.sin)])
+    coef = np.linalg.lstsq(M, res, rcond=None)[0]
+    return dict(s=s, cx=float(c0[0]), cy=float(c0[1]), a=float(a0), b=float(b), phi0=float(phi.min()), phi1=float(phi.max()),
+                wob=[float(c) for c in coef])
+
+
+def _d_spiral(g, px):
+    import math
+    import numpy as np
+    from PIL import Image, ImageDraw
+    TAU = math.tau; SS = 16
+    if px >= 48:
+        w0, w1, G, max_turns = 0.040 * px, 0.058 * px, 0.055 * px, 3.4
+    else:
+        w0, w1, G, max_turns = 1.45, 1.9, (2.0 if px < 32 else 2.4), (2.9 if px < 36 else 3.8)
+    k = px / g["s"]; cx, cy = g["cx"] * k, g["cy"] * k
+    b = g["b"] * k; a = g["a"] * k; p0, p1 = g["phi0"], g["phi1"]
+    r1 = min(a + b * p1, px / 2 - 1.0 - w1 / 2)
+    b = max(b, (w1 + G) / TAU)
+    p0 = max(p1 - max_turns * TAU, p1 - (r1 - 1.2) / b)
+    a = r1 - b * p1
+    n = 900; left, right = [], []
+    hf = list(zip([(h, f) for h in range(1, 7) for f in (np.cos, np.sin)], g["wob"]))[:4]
+    for i in range(n + 1):
+        t = i / n; ph = p0 + (p1 - p0) * t
+        wob = 0.5 * sum(c * f(h * ph) for (h, f), c in hf) * k
+        r = a + b * ph + wob; w = (w0 + (w1 - w0) * t) / 2
+        x, y = cx + r * math.cos(ph), cy + r * math.sin(ph)
+        left.append((x + math.cos(ph) * w, y + math.sin(ph) * w)); right.append((x - math.cos(ph) * w, y - math.sin(ph) * w))
+    m = Image.new("L", (px * SS, px * SS), 0); d = ImageDraw.Draw(m)
+    d.polygon([(x * SS, y * SS) for x, y in left + right[::-1]], fill=255)
+    ex, ey, er_ = cx + (a + b * p1) * math.cos(p1), cy + (a + b * p1) * math.sin(p1), w1 / 2
+    d.ellipse(((ex - er_) * SS, (ey - er_) * SS, (ex + er_) * SS, (ey + er_) * SS), fill=255)
+    cov = np.asarray(m.resize((px, px), Image.BOX), np.float32) / 255
+    acc = np.zeros((px, px, 4), np.float32)                       # the lab's premultiplied "over" of one bone layer, step for step
+    col = np.array((0xc7, 0xcc, 0xd1), np.float32) / 255
+    acc[..., :3] = col * cov[..., None] + acc[..., :3] * (1 - cov[..., None]); acc[..., 3] = cov + acc[..., 3] * (1 - cov)
+    out = np.zeros_like(acc); al = acc[..., 3:4]
+    out[..., :3] = np.where(al > 1e-6, acc[..., :3] / np.maximum(al, 1e-6), 0); out[..., 3:4] = al
+    return Image.fromarray((np.clip(out, 0, 1) * 255 + 0.5).astype(np.uint8), "RGBA")
+
+
+# the Sheet spiral, ENHANCED (S15 correction): the hand drawing itself, never redrawn. Optical fill 0.985 of the tile, 2x Lanczos for >= 64 px, local
+# contrast at source scale, a light dilation that only matters where a stroke is thinner than ~1 target px, area (BOX) filter, target sharpen, tone curve, island clean-up.
+# The source is 282 px: below ~128 px it is always a downscale (honest); above that it would be an upscale (not shipped, the 282 raster is used).
+def _d_spiral_hand(src, px):
+    import math
+    import numpy as np
+    from PIL import Image, ImageFilter
+    al = np.asarray(src.convert("RGBA"), np.float32)[..., 3] / 255
+    ys, xs = np.where(al > 0.25); x0, x1, y0, y1 = xs.min(), xs.max() + 1, ys.min(), ys.max() + 1
+    side = int(math.ceil(max(x1 - x0, y1 - y0) / 0.985)); bx, by = int(round((x0 + x1) / 2 - side / 2)), int(round((y0 + y1) / 2 - side / 2))
+    P = 40; A = np.pad(al, P)[by + P:by + P + side, bx + P:bx + P + side]
+    up = 2 if px >= 64 else 1
+    if up > 1:
+        A = np.clip(np.asarray(Image.fromarray(A.astype(np.float32), "F").resize((side * up, side * up), Image.LANCZOS), np.float32), 0, 1)
+    k = A.shape[0] / px
+    A = np.clip(A + 0.8 * (A - _d_gblur(A, 0.45 * k)), 0, 1)
+    rho = max(0.0, (0.95 * k - 3.0 * up) / 2.0) * 0.35
+    if rho > 0.5:
+        sz = 2 * int(round(rho)) + 1
+        D = _d_gblur(np.asarray(Image.fromarray((A * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(sz)), np.float32) / 255, rho * 0.35)
+        A = np.maximum(A, D * (0.7 if px < 48 else 0.8))
+    a = _p_area(A, px)
+    a = np.clip(a + 0.7 * (a - _d_gblur(a, 0.55)), 0, 1)
+    a = _p_curve(a, *((0.15, 0.65) if px < 48 else (0.08, 0.75))) ** 0.8
+    h, w = a.shape; p = np.pad(a, 1)
+    nb = np.stack([p[1 + dy:h + 1 + dy, 1 + dx:w + 1 + dx] for dy in (-1, 0, 1) for dx in (-1, 0, 1) if (dy, dx) != (0, 0)])
+    a = np.where((a > 0) & ((nb > 0.30).sum(0) == 0) & (a < 0.5), 0, a)
+    o = np.zeros((px, px, 4), np.float32); o[..., :3] = np.array((0xc7, 0xcc, 0xd1), np.float32) / 255; o[..., 3] = np.clip(a, 0, 1)
+    return Image.fromarray((o * 255 + 0.5).astype(np.uint8), "RGBA")
+
+
+# ---- S15c: new user assets (lab/v10/s15c.py ported). Workspace family `uzumaki-eye` (bleeding-eye.png), marks `heather` / `pyramid` (the `silenthill` workspace family was removed) ----
+# User pixels never ship: every product is written under the assets folder only. Gate rule (like Tomie, S15b): these are tonal families, so `crisp` is report-only
+# for the eye family below 32 px (the asset is an eye + drips in a square: ~14-18 px wide at 24-32) and for the portraits of the sheets; `fill` and `black` are enforced.
+EYE_SRC_MIN = 96                                          # the bleeding eye is 105 x 103; anything smaller is refused
+HP_ROUND = {"heather": (395, 470, 278), "pyramid": (1115, 470, 278)}      # the roundels of the Heather / Pyramid sheet: (cx, cy, r)
+
+
+def _s_rgb(im):
+    import numpy as np
+    return np.asarray(im.convert("RGB"), np.float32) / 255
+
+
+def _s_red(a):
+    import numpy as np
+    return np.clip((a[..., 0] - (a[..., 1] + a[..., 2]) / 2 - 0.16) / 0.30, 0, 1)
+
+
+def _s_digit(n, px, h, corner="tl"):
+    """(digit coverage, moat) of the Noto Serif Bold numeral on whole device px; corner top-left."""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    if _numeral_off():
+        return np.zeros((px, px), np.float32), np.zeros((px, px), np.float32)
+    SS = 8
+    m = Image.new("L", (px * SS, px * SS), 0); f = ImageFont.truetype(SERIF_BOLD, int(h * SS * 1.36)); t = str(n)
+    dr = ImageDraw.Draw(m); bb = dr.textbbox((0, 0), t, font=f); w = bb[2] - bb[0]; hh = bb[3] - bb[1]
+    tmp = Image.new("L", (w + 4, hh + 4), 0); ImageDraw.Draw(tmp).text((2 - bb[0], 2 - bb[1]), t, font=f, fill=255)
+    tmp = tmp.resize((max(1, int(w * (0.86 if n == 10 else 1))), int(h * SS)), Image.LANCZOS)
+    m.paste(tmp, (SS, 0))
+    d = _p_curve(np.asarray(m.resize((px, px), Image.BOX), np.float32) / 255, 0.18, 0.62)
+    moat = np.asarray(Image.fromarray((d * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(3)), np.float32) / 255
+    return d, moat
+
+
+class _BleedEye:
+    """bleeding-eye.png (105 x 103 in the lab; any picture within 4 % of that aspect and >= 96 px wide, the crop scales with it). The source is
+    only ever upsampled to an 752 px anti-alias canvas and area-resampled back: <= 96 px is exactly the source's information, 112/128 are an upscale."""
+    OX, OY, SIDE, K = 4, 10, 94, 8
+
+    def __init__(self, im, iris_src=None):
+        import numpy as np
+        from PIL import Image
+        w, h = im.size
+        if w < EYE_SRC_MIN or h < EYE_SRC_MIN * 0.9 or abs((w / h) / (105 / 103) - 1) > 0.04:
+            raise ValueError(f"the bleeding-eye recipe takes the eye picture (105x103, or the same shape at least {EYE_SRC_MIN} px wide); this is {w}x{h}")
+        s = w / 105.0; K = self.K; S = self.SIDE
+        crop = im.convert("RGB").crop((int(round(self.OX * s)), int(round(self.OY * s)), int(round((self.OX + S) * s)), int(round((self.OY + S) * s))))
+        canvas = crop.resize((S * K, S * K), Image.BICUBIC)
+        BE = _s_rgb(canvas); self.L = _lum(canvas); R = _s_red(BE)
+        self.iris = ((52.0 - self.OX) * K, (47.0 - self.OY) * K, 13.5 * K)
+        eyeline = (62 - self.OY) * K
+        self.have_spiral = iris_src is not None
+        self.layers = {False: self._layers(R, eyeline, None)}
+        if iris_src is not None:
+            self.layers[True] = self._layers(R, eyeline, _lum(iris_src))
+
+    def _layers(self, R, eyeline, U):
+        import numpy as np
+        from PIL import Image
+        L = self.L; K = self.K
+        lv = np.clip((L - 0.05) / 0.50, 0, 1) ** 0.8
+        ink = lv * (1 - R); blood = R * np.clip(lv * 1.4 + 0.3, 0, 1)
+        yy, xx = np.mgrid[0:L.shape[0], 0:L.shape[1]]
+        drips = (yy > eyeline).astype(np.float32)
+        ix, iy, ir = self.iris
+        if U is not None:                                   # the Uzumaki engraving's own spiral iris (disc 848,485 r 208), scaled into the iris disc
+            cx, cy, r = 848.0, 485.0, 208.0
+            sp = U[int(cy - r):int(cy + r), int(cx - r):int(cx + r)]
+            sp = np.asarray(Image.fromarray((sp * 255).astype(np.uint8)).resize((int(2 * ir), int(2 * ir)), Image.LANCZOS), np.float32) / 255
+            dm = _d_disc(ir, ir, ir - 2, sp.shape)
+            x0, y0 = int(ix - ir), int(iy - ir)
+            reg = (slice(y0, y0 + sp.shape[0]), slice(x0, x0 + sp.shape[1]))
+            spl = np.clip((sp - 0.08) / 0.42, 0, 1)
+            ink[reg] = ink[reg] * (1 - dm) + spl * dm
+            blood[reg] = blood[reg] * (1 - dm)
+        core = _d_disc(ix, iy, 2.2 * K, ink.shape)
+        return ink, blood, drips, core
+
+    def ws(self, n, st, px, spiral, memo):
+        import numpy as np
+        key = (px, spiral)
+        if key not in memo:
+            ink, blood, drips, core = self.layers[spiral]
+            i, b, dr, c = (_p_area(m, px) for m in (ink, blood, drips, core))
+            if px >= 112:
+                i = np.clip(_d_usm(i, 0.6, 0.6), 0, 1)
+            i = _d_finish(i, px, 0.45, (0.20, 0.66)); b = _p_curve(b, 0.12, 0.55) if px < 48 else b
+            memo[key] = (i, b, _p_curve(c, 0.2, 0.6), 1 - _p_curve(dr, 0.3, 0.7))
+        i, b, cc, eye_only = memo[key]
+        N, moat = _s_digit(n, px, max(8, int(round(0.36 * px))) if px <= 32 else int(round(11.5 + 0.16 * (px - 32))))
+        if st == "empty":      ink_, bl_ = np.maximum(i * eye_only * 0.45, N * 0.7), 0 * i
+        elif st == "occupied": ink_, bl_ = np.maximum(np.maximum(i, b) * eye_only, N), 0 * i
+        elif st == "active":   ink_, bl_ = np.maximum(i, N), np.maximum(b, cc)
+        else:                  ink_, bl_ = np.maximum(cc, N), np.maximum(i, b) * (1 - cc)
+        ink_ = ink_ * (1 - moat) + N * moat; bl_ = bl_ * (1 - moat)
+        return _p_rgba(ink_, bl_)
+
+
+def _lum_a(a):
+    return 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
+
+
+class _HeatherPyramid:
+    """`Heather pyramid.png` (1536x1024): two roundels. Micro (< 36 px) = SIGIL (broken ring + blood ticks + glyph), >= 36 = the PORTRAIT of the art."""
+    def __init__(self, im):
+        self.im = im.convert("RGB")
+
+    def sigil(self, name, px):
+        import numpy as np
+        from PIL import Image, ImageDraw
+        SS = 8; S = px * SS; c = S / 2; r = 0.36 * S
+        ink = Image.new("L", (S, S), 0); bl = Image.new("L", (S, S), 0); di, db = ImageDraw.Draw(ink), ImageDraw.Draw(bl)
+        w = max(1.4, 0.055 * px) * SS
+        for a0 in (0, 90, 180, 270):
+            di.arc((c - r, c - r, c + r, c + r), a0 + 12, a0 + 78, fill=255, width=int(w))
+        tw = max(1.0, 0.04 * px) * SS
+        for y0, y1 in ((c - r - 0.12 * S, c - r + 0.10 * S), (c + r - 0.10 * S, c + r + 0.12 * S)):
+            db.rectangle((c - tw / 2, y0, c + tw / 2, y1), fill=255)
+        if name == "heather":
+            rr = 0.17 * S; di.ellipse((c - rr, c - rr, c + rr, c + rr), outline=255, width=int(max(1.2, 0.05 * px) * SS))
+            rb = 0.10 * S; db.ellipse((c - rb, c - rb, c + rb, c + rb), fill=255)
+        else:
+            tri = 0.22 * S; db.polygon([(c - tri, c - 0.6 * tri), (c + tri, c - 0.6 * tri), (c, c + 0.9 * tri)], fill=255)
+        g = lambda im: np.asarray(im.resize((px, px), Image.BOX), np.float32) / 255
+        return g(ink), g(bl)
+
+    def portrait(self, name, px):
+        import numpy as np
+        cx, cy, R = HP_ROUND[name]; R2 = int(R * 1.16); t = _s_rgb(self.im.crop((cx - R2, cy - R2, cx + R2, cy + R2)))
+        L = _lum_a(t); Rd = _s_red(t); k = t.shape[0] / px
+        L = np.clip(_d_usm(L, 0.9 * k, 0.9), 0, 1); lv = np.clip((L - 0.10) / 0.70, 0, 1)
+        i, b = _p_area(lv * (1 - Rd), px), _p_area(Rd, px)
+        i = _d_finish(i, px, 0.45, (0.24, 0.66)); b = _p_curve(b, 0.10, 0.50) if px < 64 else b
+        return i, b
+
+    ROUNDEL = {"heather": (408, 474, 282), "pyramid": (1122, 474, 285)}      # ring centre x, y and radius in the 1536x1024 sheet (measured on the red ring)
+    WIN_H = 340                                                              # half side of the square cut: ring + ticks + the glyph under it
+
+    def roundel(self, name, px, light=False):
+        """S18 XL roundel (`Heather pyramid.png`): the portrait INSIDE the red broken ring, with its ticks and the glyph below. >= 36 px the real roundel is cut
+        (portrait = the picture's own tone, ring / ticks / glyph = the picture's red -> blood); < 36 px a clean ring (4 broken arcs, blood), two ticks and the glyph are drawn
+        on whole pixels around a simplified portrait. Dark: the portrait's light is the bone; light twin: its shade is the ink. -> (ink, blood) coverage."""
+        import numpy as np
+        from PIL import Image, ImageDraw
+        cx, cy, R = self.ROUNDEL[name]; H = self.WIN_H; oy = 505
+        t = _s_rgb(self.im.crop((cx - H, oy - H, cx + H, oy + H)))
+        L = _lum_a(t); red = np.clip((t[..., 0] - np.maximum(t[..., 1], t[..., 2]) - 0.04) / 0.14, 0, 1)     # the picture's ring is a dark crimson: a low threshold keeps it
+        yy, xx = np.mgrid[0:2 * H, 0:2 * H]
+        rc = np.hypot(xx - H, yy - (cy - (oy - H)))
+        disc = np.clip(R * 0.93 - rc + 0.5, 0, 1)
+        inside = disc > 0.5
+        lo, hi = np.percentile(L[inside], [4, 99.5])
+        tone = np.clip((L - lo) / max(hi - lo, 1e-3), 0, 1)
+        tone = tone ** (0.85 if name == "heather" else 0.7)
+        k = 2 * H / px
+        tone = np.clip(_d_usm(tone, 0.9 * k, 0.8), 0, 1)
+        pt = (1 - tone) ** (1.8 if name == "pyramid" else 1.3) * 0.92 if light else tone      # the light twin: shade = ink, lifted so a dark scene is not a black disc
+        pt = pt * disc * (1 - red)
+        g = lambda m: _p_area(m, px)
+        I = g(pt)
+        I = _p_curve(I, 0.10, 0.85) if px < 64 else I
+        if px >= 36:
+            from PIL import Image as _I, ImageDraw as _D
+            SS = 8; S = px * SS; c = S / 2; ccy = (cy - (oy - H)) / (2 * H) * S; Rr = R / (2 * H) * S
+            bl = _I.new("L", (S, S), 0); d = _D.Draw(bl); w = max(1.2, 0.032 * px) * SS
+            for a0 in (0, 90, 180, 270):                                        # the broken ring, clean, under the picture's own red
+                d.arc((c - Rr, ccy - Rr, c + Rr, ccy + Rr), a0 + 13, a0 + 77, fill=255, width=int(w))
+            arcs = np.asarray(bl.resize((px, px), _I.BOX), np.float32) / 255
+            Bm = g(red); Bm = _p_curve(Bm, 0.05, 0.40) if px < 96 else Bm
+            Bm = np.maximum(Bm, arcs * (0.9 if px < 96 else 0.75))
+            return I * (1 - Bm), Bm
+        # ---- micro: a clean ring drawn on whole pixels
+        SS = 8; S = px * SS; c = S / 2; ccy = 0.45 * S; Rr = 0.36 * S
+        bl = Image.new("L", (S, S), 0); d = ImageDraw.Draw(bl)
+        w = max(1.0, 0.055 * px) * SS
+        for a0 in (0, 90, 180, 270):
+            d.arc((c - Rr, ccy - Rr, c + Rr, ccy + Rr), a0 + 14, a0 + 76, fill=255, width=int(w))
+        tw = max(1.0, 0.045 * px) * SS
+        d.rectangle((c - tw / 2, ccy - Rr - 0.085 * S, c + tw / 2, ccy - Rr + 0.07 * S), fill=255)
+        gy = ccy + Rr + 0.105 * S
+        if name == "heather":
+            rr = max(1.5, 0.07 * px) * SS; d.ellipse((c - rr, gy - rr, c + rr, gy + rr), fill=255)
+        else:
+            rr = max(1.8, 0.075 * px) * SS; d.polygon([(c - rr, gy - 0.7 * rr), (c + rr, gy - 0.7 * rr), (c, gy + 0.9 * rr)], fill=255)
+        Bm = np.asarray(bl.resize((px, px), Image.BOX), np.float32) / 255
+        # the portrait re-fitted inside the small ring (radius 0.30 px)
+        sc = (0.30 * px) / (R * 0.93)
+        P = np.zeros((px, px), np.float32)
+        tw_ = int(round(2 * H * sc)); big = Image.fromarray((np.clip(pt, 0, 1) * 255).astype(np.uint8)).resize((tw_ * 4, tw_ * 4), Image.LANCZOS)
+        small = np.asarray(big.resize((tw_, tw_), Image.BOX), np.float32) / 255
+        x0 = int(round(px / 2 - (H) * sc)); y0 = int(round(0.45 * px - (cy - (oy - H)) * sc))
+        for yy_ in range(tw_):
+            for xx_ in range(tw_):
+                Y, X = y0 + yy_, x0 + xx_
+                if 0 <= Y < px and 0 <= X < px: P[Y, X] = small[yy_, xx_]
+        P = _p_curve(P, 0.12, 0.80)
+        return P * (1 - Bm), Bm
+
+    def mark(self, name, px, light=False):
+        I, B = self.roundel(name, px, light)
+        return _p_rgba(I, B)
+
+    def mark_old(self, name, px):
+        if px < 36:
+            I, B = self.sigil(name, px)
+            return _p_rgba(I * (1 - B), B)
+        i, b = self.portrait(name, px)
+        return _p_rgba(i, b)
+
+
+def make_photo(kind, src, iris=None, extra=None):
+    """[(rel, PIL RGBA)] of one photo recipe for every tier. Pure (no files); raises ValueError on a source of the wrong size."""
+    from PIL import Image
+    if PHOTO_SRC[kind] is not None and src.size != PHOTO_SRC[kind] and not (kind in ("tomie", "ws-tomie") and src.size == TOMIE_HD_SRC):
+        raise ValueError(f"the {kind} recipe takes a {PHOTO_SRC[kind][0]}x{PHOTO_SRC[kind][1]} picture; this is {src.size[0]}x{src.size[1]}")
+    out = []
+    extra = extra or {}
+    if kind in ("mark-heather", "mark-pyramid", "ws-uzumaki-eye", "beetle", "ws-beetle", "hollow-pack"):
+        import ito_sh
+        ito_sh.set_sources(sheet={"hollow-pack": src}.get(kind) or extra.get("sheet"), hp=src if kind in ("mark-heather", "mark-pyramid") else extra.get("hp"),
+                           eye=src if kind == "ws-uzumaki-eye" else None, beetle=src if kind in ("beetle", "ws-beetle") else None)
+    if kind.startswith("eye-"):
+        return make_eye(kind[4:], src)
+    if kind in ("relic-sys", "ws-symbols", "relic-apps"):
+        import ito_gothic
+        return ito_gothic.products(kind, src, extra.get("ink"), extra.get("blood"), bool(extra.get("light")))
+    if kind == "ws-cult":
+        import ito_cult
+        return ito_cult.products(BAR_PX)
+    if kind == "sprites":
+        import ito_sprites
+        ito_sprites.set_source(src)
+        return ito_sprites.products(BAR_PX)
+    if kind == "pyramid-head":
+        import ito_pyramid
+        ito_pyramid.set_source(src)
+        return ito_pyramid.products(BAR_PX)
+    if kind == "ws-heather":
+        import ito_ringws
+        ito_ringws.set_source(src)
+        return ito_ringws.products_heather(BAR_PX)
+    if kind == "spiral":
+        g = _d_spiral_fit(src)
+        return [(f"system/bar/{px}/system-normal.png", _d_spiral_hand(src, px)) for px in BAR_PX] + \
+               [(f"system/bar/{px}/system-normal-clean.png", _d_spiral(g, px)) for px in BAR_PX]
+    if kind == "tomie":
+        T = _tomie_of(src)
+        # The menu mark picker offers only Tomie Classic (a stored `tomie` reads as it), so a fresh install needs marks/tomie-classic* too.
+        # Written from this picture, except that the HD panel never replaces a Tomie Classic that is already there (the user's own earlier drawing).
+        classic = not (src.size == TOMIE_HD_SRC and (ASSETS / "marks" / "tomie-classic.png").is_file())
+        for px in BAR_PX + (512,):
+            d = "marks" if px == 512 else f"marks/bar/{px}"
+            if px != 512:                                  # S15: the v10 definition beside the v9 files (markDef); the head-crop products were removed
+                n11 = (_d_tomie_sticker(T, px, False), _d_tomie_sticker(T, px, True))      # S19c: the die-cut sticker (tomie-clear and tomie-wide were removed)
+                out += [(f"{d}/tomie.png", n11[0]), (f"{d}/tomie.light.png", n11[1]), (f"{d}/tomie.v10.png", n11[0]), (f"{d}/tomie.v10.light.png", n11[1])]
+                if classic:
+                    out += [(f"{d}/tomie-classic.png", n11[0]), (f"{d}/tomie-classic.light.png", n11[1])]
+            else:
+                out += [(f"{d}/tomie.png", _d_tomie_sticker(T, 512, False)), (f"{d}/tomie.light.png", _d_tomie_sticker(T, 512, True))]
+                if classic:
+                    out += [(f"{d}/tomie-classic.png", out[-2][1]), (f"{d}/tomie-classic.light.png", out[-1][1])]
+    elif kind == "uzumaki-eye":
+        U = _UzEye(src)
+        for px in BAR_PX + (512,):
+            d = "marks" if px == 512 else f"marks/bar/{px}"
+            out += [(f"{d}/uzumaki-eye.png", U.mark(px, False)), (f"{d}/uzumaki-eye.light.png", U.mark(px, True))]
+            if px != 512:
+                out += [(f"{d}/uzumaki-eye.v10.png", _d_uzeye(U, px, False)), (f"{d}/uzumaki-eye.v10.light.png", _d_uzeye(U, px, True))]
+    elif kind == "ws-uzumaki-eye":
+        E = _BleedEye(src, iris); memo = {}
+        main = E.have_spiral                                # the spiral iris is the default; without the engraving the plain iris is the only set
+        for px in BAR_PX:
+            for n in range(1, 11):
+                for st in PHOTO_STATES:
+                    im = E.ws(n, st, px, main, memo)
+                    out += [(f"workspaces/bar/{px}/ws-uzumaki-eye-{n}-{st}.png", im), (f"workspaces/bar/{px}/ws-uzumaki-eye-{n}-{st}.light.png", im)]
+                    if main:                                # key eyeWsIris plain
+                        out.append((f"workspaces/bar/{px}/ws-uzumaki-eye-{n}-{st}.alt.png", E.ws(n, st, px, False, memo)))
+        out += ito_sh.ws_eye_tight(BAR_PX)                  # S17c: the tight crop (`.v12`, key eyeWsCrop tight = the default); the files above are `wide`
+        out += ito_sh.previews("uzumaki-eye", lambda n, st, px, lt: E.ws(n, st, px, main, memo), BAR_PX, light=False)      # the picker's numeral-free card art
+        out += ito_sh.previews("uzumaki-eye", lambda n, st, px, lt: ito_sh.to_rgba(ito_sh.uz_eye(n, st, px)), BAR_PX, light=False, suffix=".v12")
+    elif kind in ("mark-heather", "mark-pyramid"):
+        H = _HeatherPyramid(src); nm = kind[5:]
+        for px in BAR_PX + (512,):
+            d = "marks" if px == 512 else f"marks/bar/{px}"
+            out += [(f"{d}/{nm}-sigil.png", H.mark(nm, px, False)), (f"{d}/{nm}-sigil.light.png", H.mark(nm, px, True))]      # S17b: the old sigil / portrait stays selectable as `<name>-sigil`
+        out += ito_sh.mark_character(nm, BAR_PX)            # S17b: `heather` / `pyramid` are now the characters themselves (no ring, ticks or glyph)
+    elif kind == "hollow-pack":
+        out += ito_sh.pack_user() + ito_sh.pack_procedural()
+    elif kind == "ws-tomie":
+        T = _tomie_of(src); memo = {}; memo11 = {}
+        for px in BAR_PX:
+            for n in range(1, 11):
+                for st in PHOTO_STATES:
+                    out.append((f"workspaces/bar/{px}/ws-tomie-{n}-{st}.png", _w_tomie12(T, n, st, px, False, memo, memo11)))
+                    out.append((f"workspaces/bar/{px}/ws-tomie-{n}-{st}.light.png", _w_tomie12(T, n, st, px, True, memo, memo11)))
+        import ito_sh
+        out += ito_sh.previews("tomie", lambda n, st, px, lt: _w_tomie12(T, n, st, px, lt, memo, memo11), BAR_PX)      # the picker's numeral-free card art
+    else:
+        B = _BeetleFix(src)
+        # S18: ONE beetle (the verified thin-line recipe) is the default under every definition: the old v9 / v10 / v12 products were replaced
+        # (kept as a tarball in ~/.config/omarchy/backups/2026-10-15-beetle-old/), so markDef / beetleDef / wsBeetleDef all resolve to the same pictures
+        if kind == "beetle":
+            for px in BAR_PX + (512,):
+                d = "marks" if px == 512 else f"marks/bar/{px}"
+                im = B.mark(px)
+                out += [(f"{d}/beetle{suf}.png", im) for suf in ("", ".light")]
+                if px != 512:
+                    out += [(f"{d}/beetle.{v}{suf}.png", im) for v in ("v10", "v12") for suf in ("", ".light")]
+        else:
+            for px in BAR_PX:
+                for n in range(1, 11):
+                    for st in PHOTO_STATES:
+                        im = B.ws(n, st, px)
+                        out += [(f"workspaces/bar/{px}/ws-beetle-{n}-{st}{v}{suf}.png", im) for v in ("", ".v10", ".v12") for suf in ("", ".light")]
+            for prel, im in ito_sh.previews("beetle", lambda n, st, px, lt: B.ws(n, st, px), BAR_PX, light=False):      # the picker's card art, no Mayan numeral
+                out += [(prel[:-4] + v + suf + ".png", im) for v in ("", ".v10", ".v12") for suf in ("", ".light")]
+    return out
+
+
+def cmd_photo(argv):
+    import shutil, tempfile
+    kind, file, dry, iris_file = argv[0], None, False, None
+    extra_files = {}
+    gopt = {}                                              # S18 relic-apps: --out DIR, --ink R,G,B, --blood R,G,B, --light
+    args = list(argv[1:])
+    while args:
+        a = args.pop(0)
+        if a in ("--out", "--ink", "--blood") and args:
+            gopt[a[2:]] = args.pop(0)
+        elif a == "--light":
+            gopt["light"] = True
+        elif a == "--iris" and args:
+            iris_file = Path(args.pop(0)).expanduser()
+        elif a in ("--hp", "--sheet") and args:           # S17: the second sheet of hollow-pack
+            extra_files[a[2:]] = Path(args.pop(0)).expanduser()
+        elif a == "--dry-run":
+            dry = True
+        elif not a.startswith("-") and file is None:
+            file = Path(a).expanduser()
+        else:
+            out({"error": "usage: ito-assets recipe tomie|uzumaki-eye|beetle|ws-beetle|ws-tomie|eye-uzumaki|eye-lashed|eye-veined FILE [--dry-run]"}, 2)
+    if not file and kind == "spiral":
+        file = ART / "system" / "system-normal.png"
+    nosrc = kind == "ws-cult"                              # drawn from the games' designs: no source picture is read or kept
+    if not file and not nosrc:
+        out({"error": "usage: ito-assets recipe tomie|uzumaki-eye|beetle|ws-beetle|ws-tomie|spiral|eye-uzumaki|eye-lashed|eye-veined [FILE] [--dry-run]"}, 2)
+    repo = ART.resolve().parents[2]
+    if not dry and (ASSETS.resolve() == repo or repo in ASSETS.resolve().parents):
+        out({"error": f"refused: {ASSETS} is inside {repo}; user pictures never go into a repo"}, 1)
+    apps_dir = None
+    if kind == "relic-apps":                              # the icon theme is GTK's: its own folder, no index, never inside the repo
+        apps_dir = Path(gopt.get("out") or HOME / ".local" / "share" / "icons").expanduser().resolve()
+        if apps_dir == repo or repo in apps_dir.parents:
+            out({"error": f"refused: {apps_dir} is inside {repo}; user pictures never go into a repo"}, 1)
+        try:
+            for k in ("ink", "blood"):
+                if k in gopt:
+                    v = tuple(int(x) for x in str(gopt[k]).split(","))
+                    if len(v) != 3 or not all(0 <= x <= 255 for x in v):
+                        raise ValueError
+                    extra_files[k] = v
+        except ValueError:
+            out({"error": "--ink and --blood take R,G,B (0-255)"}, 2)
+    try:
+        import numpy  # noqa: F401
+        from PIL import Image
+    except ImportError:
+        out({"error": "Pillow and numpy are needed for a recipe"}, 1)
+    if not nosrc and (file.is_symlink() or not file.is_file() or file.stat().st_size > IN_MAX_BYTES):
+        out({"error": f"{file} is not a regular picture file of at most 32 MB"}, 1)
+    Image.MAX_IMAGE_PIXELS = int(MAX_PX)
+    try:
+        if nosrc:
+            src = None
+        else:
+            with Image.open(file) as im:
+                if im.format not in ("PNG", "JPEG", "WEBP"):
+                    raise ValueError(f"a {im.format} file is not accepted")
+                im.load()
+                src = im.convert("RGBA" if kind in ("spiral", "sprites", "pyramid-head") else "RGB")
+        iris = None
+        if kind == "ws-uzumaki-eye":                       # the spiral iris: --iris FILE, else the engraving the uzumaki-eye recipe kept
+            cands = [iris_file] if iris_file else sorted((ASSETS / "_sources").glob("uzumaki-eye__*")) + sorted((ASSETS / "_sources").glob("eye-uzumaki__*"))
+            for c in cands:
+                if c and c.is_file() and not c.is_symlink() and c.stat().st_size <= IN_MAX_BYTES:
+                    with Image.open(c) as ii:
+                        ii.load()
+                        if ii.size == PHOTO_SRC["uzumaki-eye"]:
+                            iris = ii.convert("RGB")
+                            break
+        extra = {}
+        for key, prefixes in (("hp", ("mark-heather__", "mark-pyramid__")), ("sheet", ("hollow-pack__", "sh-pack__"))):
+            cands = [extra_files[key]] if key in extra_files else [c for pre in prefixes for c in sorted((ASSETS / "_sources").glob(pre + "*"))]
+            for c in cands:
+                if c and c.is_file() and not c.is_symlink() and c.stat().st_size <= IN_MAX_BYTES:
+                    with Image.open(c) as ii:
+                        ii.load()
+                        if ii.size == (1536, 1024):
+                            extra[key] = ii.convert("RGB")
+                            break
+        if kind == "hollow-pack" and "hp" not in extra:
+            raise ValueError("hollow-pack needs your Heather / Pyramid sheet too: --hp FILE (1536x1024)")
+        extra.update({k: v for k, v in extra_files.items() if k in ("ink", "blood")})
+        if gopt.get("light"):
+            extra["light"] = True
+        products = make_photo(kind, src, iris, extra)
+    except ValueError as e:
+        out({"error": f"rejected: {e}"}, 1)
+    except Exception as e:
+        out({"error": f"rejected: the picture cannot be read ({type(e).__name__})"}, 1)
+    root = Path(tempfile.mkdtemp(prefix="ito-recipe-")) if dry else (apps_dir or ASSETS)
+    report, written, refused = [], [], []
+    try:
+        for prel, img in products:
+            m = _metrics(img)
+            is_bar = split_bar(prel)[1] > 0 and kind != "relic-apps"     # apps: sizes 16-128 are not bar tiers, only the no-black-ground gate
+            tile = re.match(r"^marks/(?:bar/\d+/)?tomie(?:-classic|\.v10)?(?:\.light)?\.png$", prel) is not None     # the opaque bone tile with real ink (S19b): fill and black are by design
+            natural = kind == "pyramid-head" and re.match(r"^(?:marks/(?:bar/\d+/)?pyramid-head|workspaces/bar/\d+/ws-pyramid-)", prel) is not None     # S22/S23: the sprite's true deep shadows in theme tokens (the shader maps black to the theme's darkest colour), by design
+            ok = tile or natural or m["black"] <= TONAL["black"] and (not is_bar or (kind == "ws-beetle" and ".v12" not in prel) or (m["fill"] <= TONAL["fill"] and (kind in CRISP_REPORT or ".v12" in prel or m["crisp"] >= TONAL["crisp"])))     # tonal families: crisp is report-only (as ws-tomie, S2d); fill and black are enforced
+            report.append({"file": prel, "gate": "pass" if ok else "FAIL", **m})
+            if not ok:
+                refused.append(prel)
+                continue
+            dest = root / prel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dest.with_name(dest.name + f".{os.getpid()}.tmp")
+            img.save(tmp, format="PNG", optimize=True)
+            os.replace(tmp, dest)
+            written.append(prel)
+        rejected = {}
+        if dry:
+            deadline = time.time() + BUDGET
+            for prel in ([] if kind == "relic-apps" else written):
+                try:
+                    check(prel, root / prel, deadline)
+                except ValueError as e:
+                    rejected[prel] = str(e)
+        else:
+            if apps_dir is not None:
+                import ito_gothic
+                (apps_dir / "Ito-verse-icons-v2").mkdir(parents=True, exist_ok=True)
+                (apps_dir / "Ito-verse-icons-v2" / "index.theme").write_text(ito_gothic.index_theme())
+                rejected = {}
+            else:
+                if not nosrc:
+                    keep = ASSETS / "_sources" / (f"{kind}__" + file.name + (file.suffix.lower() if not file.suffix else ""))
+                    keep.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(file, keep)
+                idx = build()
+                write(idx)
+                rejected = {p: idx["rejected"][p] for p in written if p in idx["rejected"]}
+    finally:
+        if dry:
+            shutil.rmtree(root, ignore_errors=True)
+    worst = {}
+    for r in report:
+        px = split_bar(r["file"])[1] or 512
+        w = worst.setdefault(px, {"crisp": 9, "fill": 0, "black": 0})
+        w["crisp"], w["fill"], w["black"] = min(w["crisp"], r["crisp"]), max(w["fill"], r["fill"]), max(w["black"], r["black"])
+    out({"ok": not rejected and bool(written) and not refused, "recipe": kind, "dry_run": dry, "files": len(written) if not dry else 0,
+         "would_write": len(written) if dry else 0, "not_offered": refused, "rejected": rejected, "worst_per_tier": worst,
+         "gate": [r for r in report if r["gate"] != "pass"]},
+        0 if written and not rejected and not refused else 1)
+
+
+SHEETS_SOURCES = {"tomie": ("tomie__", (1500, 2000)), "pyramid": ("pyramid-head__", (1254, 1254)), "sprites": ("sprites__", (1920, 1080))}
+
+
+def cmd_sheets(argv):
+    """ito-assets recipe sheets: the lock scenes and boot pictures (ito_sheets.py) from the user's HD pictures, written only to <assets>/lock/ and <assets>/cards/."""
+    import shutil, tempfile
+    files, only, dry, args = {}, None, False, list(argv)
+    while args:
+        a = args.pop(0)
+        if a in ("--tomie", "--pyramid", "--sprites") and args:
+            files[a[2:]] = Path(args.pop(0)).expanduser()
+        elif a == "--only" and args:
+            only = [k for k in args.pop(0).split(",") if k]
+        elif a == "--dry-run":
+            dry = True
+        else:
+            out({"error": "usage: ito-assets recipe sheets [--tomie FILE] [--pyramid FILE] [--sprites FILE] [--only KEY,...] [--dry-run]"}, 2)
+    repo = ART.resolve().parents[2]
+    if not dry and (ASSETS.resolve() == repo or repo in ASSETS.resolve().parents):
+        out({"error": f"refused: {ASSETS} is inside {repo}; user pictures never go into a repo"}, 1)
+    try:
+        import numpy  # noqa: F401
+        from PIL import Image
+        import ito_sheets
+    except ImportError:
+        out({"error": "Pillow and numpy are needed for a recipe"}, 1)
+    Image.MAX_IMAGE_PIXELS = int(MAX_PX)
+    pics, used = {}, {}
+    try:
+        for key, (prefix, size) in SHEETS_SOURCES.items():
+            cands = [files[key]] if key in files else sorted((ASSETS / "_sources").glob(prefix + "*"))
+            for c in cands:
+                if c.is_symlink() or not c.is_file() or c.stat().st_size > IN_MAX_BYTES:
+                    if key in files:
+                        raise ValueError(f"{c} is not a regular picture file of at most 32 MB")
+                    continue
+                with Image.open(c) as im:
+                    if im.format not in ("PNG", "JPEG", "WEBP"):
+                        raise ValueError(f"a {im.format} file is not accepted")
+                    if im.size != size:
+                        if key in files:
+                            raise ValueError(f"the {key} picture is {size[0]}x{size[1]}; this is {im.size[0]}x{im.size[1]}")
+                        continue
+                    im.load()
+                    pics[key], used[key] = im.convert("RGBA"), str(c)
+                    break
+        ito_sheets.set_sources(**pics)
+        keys = only or ito_sheets.available()
+        unknown = [k for k in keys if k not in ito_sheets.KEYS]
+        if unknown:
+            raise ValueError(f"unknown scene {unknown[0]!r}; scenes: {', '.join(ito_sheets.KEYS)}")
+        if not keys:
+            raise ValueError("no source picture found (tomie / pyramid-head / sprites in _sources, or pass --tomie / --pyramid / --sprites)")
+        products = ito_sheets.products(keys)
+    except ValueError as e:
+        out({"error": f"rejected: {e}"}, 1)
+    root = Path(tempfile.mkdtemp(prefix="ito-sheets-")) if dry else ASSETS
+    written, report = [], []
+    try:
+        for rel, img in products:
+            if not rel.startswith(("lock/", "cards/")) or ".." in rel:
+                raise ValueError(rel)
+            w, h = img.size
+            report.append({"file": rel, "size": [w, h]} | ({"safe": ito_sheets.safe_report(img, w, h)} if rel.startswith("lock/") else {}))
+            dest = root / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dest.with_name(dest.name + f".{os.getpid()}.tmp")
+            img.save(tmp, format="PNG", optimize=True)
+            os.replace(tmp, dest)
+            written.append(rel)
+        if not dry:
+            for key, path in used.items():          # the sources the recipe read are kept beside the others (never in a repo)
+                p = Path(path)
+                if p.parent != ASSETS / "_sources":
+                    keep = ASSETS / "_sources" / (SHEETS_SOURCES[key][0] + p.name)
+                    keep.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(p, keep)
+    finally:
+        if dry:
+            shutil.rmtree(root, ignore_errors=True)
+    out({"ok": bool(written), "recipe": "sheets", "dry_run": dry, "files": 0 if dry else len(written), "would_write": len(written) if dry else 0,
+         "target": str(ASSETS / "lock"), "cards_target": str(ASSETS / "cards"), "sources": used, "report": report}, 0 if written else 1)
+
+
+def cmd_migrate_marks():
+    """marks/remina-real{,.light}.png (+ marks/bar/<px>/) -> marks/remina{,.light}.png, once; never over an existing file."""
+    moved = []
+    if ASSETS.is_dir():
+        for rel, p in walk():
+            m = re.match(r"^(marks/(?:bar/\d+/)?)remina-real(\.light)?\.png$", rel)
+            if not m:
+                continue
+            dst = ASSETS / (m.group(1) + "remina" + (m.group(2) or "") + ".png")
+            if not dst.exists():
+                os.replace(p, dst)
+                moved.append(rel)
+    return moved
+
+
+def cmd_slots():
+    idx = load_index() or {}
+    have = idx.get("slots", {})
+    out({"ok": True, "root": str(ASSETS), "slots": [
+        {"slot": k, "canvas": [v[0], v[1]], "for": SLOT_USE.get(k, ""), "present": k in have, "light": k[:-4] + ".light.png" in have}
+        for k, v in sorted(SLOTS.items())]})
+
+
+def main(argv):
+    cmd = argv[0] if argv else ""
+    if cmd == "status":
+        out(load_index() or {"version": 1, "files": {}, "rejected": {}})
+    if cmd == "slots":
+        cmd_slots()
+    if cmd == "ingest":
+        cmd_ingest(argv[1:])
+    if cmd == "recipe" and argv[1:2] == ["sheets"]:
+        cmd_sheets(argv[2:])
+    if cmd == "recipe" and argv[1:2] and argv[1] in RECIPE_ALIASES:     # S24: the old recipe names still run, under the new ones
+        argv[1] = RECIPE_ALIASES[argv[1]]
+    if cmd == "recipe" and argv[1:2] and argv[1] in PHOTO_RECIPES:
+        cmd_photo(argv[1:])
+    if cmd == "recipe":
+        cmd_recipe(argv[1:])
+    if cmd == "migrate-marks":
+        out({"ok": True, "moved": cmd_migrate_marks()})
+    if cmd == "index":
+        cmd_migrate_marks()
+        old = load_index()
+        if "--if-stale" in argv and old and old.get("sig") == signature(walk()):
+            out({"ok": True, "unchanged": True, "files": len(old.get("files", {})), "rejected": len(old.get("rejected", {}))})
+        try:
+            idx = build()
+            if not idx["files"] and not idx["rejected"] and old is None and not ASSETS.is_dir():
+                idx["sig"] = signature([])
+            write(idx)
+        except Exception as e:      # never leave a half index: an empty one means the shipped art
+            try:
+                write({"version": 1, "root": str(ASSETS), "sig": "", "files": {}, "slots": {}, "rejected": {}, "warnings": {}, "error": f"{type(e).__name__}"})
+            except OSError:
+                pass
+            out({"ok": False, "error": f"index failed: {type(e).__name__}"}, 1)
+        out({"ok": True, "files": len(idx["files"]), "slots": len(idx["slots"]), "rejected": len(idx["rejected"]), "warnings": len(idx["warnings"])})
+    out({"error": "usage: ito-assets index [--if-stale] | status | slots | ingest FILE --as SLOT [--light] | recipe --list | recipe lightink|lineart FILE --as REL [options]"}, 2)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

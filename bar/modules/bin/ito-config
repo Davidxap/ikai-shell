@@ -1,0 +1,397 @@
+#!/usr/bin/env bash
+# ito-config — read and write Ito bar module settings.
+#
+# Settings live in ito-style.json next to the modules, NOT in shell.json. The
+# bar engine owns shell.json and rewrites it whenever a module is dragged or a
+# popup toggles, which used to revert our writes seconds after they landed --
+# the "the style changes by itself" bug. The old version of this script carried
+# a sleep-and-rewrite race guard to fight that; the sidecar removes the race, so
+# the guard is gone.
+#
+# Usage: ito-config get   <key> [fallback]
+#        ito-config set   <key> <value>
+#        ito-config reset [--all | --key k... | --section PAGE/SECTION | --page PAGE]   (backs up first)
+#        ito-config restore [ts] | backups | defaults [--page P] [--section S] [--json]
+#        ito-config setmany <key=value> [...]
+#        ito-config toggle <key>
+#        ito-config cycle <key> <v1> <v2> [...]
+#        ito-config list
+set -euo pipefail
+ITO_BIN_DIR="$(dirname "$(readlink -f "$0")")"
+export ITO_BIN_DIR
+
+python3 - "$@" <<'PY'
+import fcntl, json, os, sys
+
+# ITO_STYLE_PATH overrides the sidecar (tests run against a copy); the default is the live one.
+PATH_ = os.path.expanduser(os.environ.get("ITO_STYLE_PATH") or "~/.config/omarchy/bar/modules/ito-style.json")
+INTS = {"screensaverFps", "bootSize", "size", "workspaceCount", "barSize", "wsCustomVer", "fxCustomVer", "marksVer", "weatherMinutes"}
+BOOLS = {"userAssets", "showValues", "surfacePlate", "surfaceBorder", "surfaceCorners", "fxPlate", "fxGlass", "fxPaper",
+         "fxBlood", "bloodSeep", "fxWood", "fxCalm", "fxGrain", "fxTone", "fxBorder", "fxPills", "barFloat", "barShadow",
+         "tooltipBlood", "panelFrame", "oneBar", "fxTorn", "fxFog", "fxFogDrift", "pressBleed", "formParity", "dockFloat", "wsBarArt", "wsHdTiers", "markHdTiers", "valueLabels", "presence", "presenceShoulders", "debugAnchor", "debugFrames", "ccMotion",
+         "lockTheme", "idleScreensaver", "fastfetchTheme",
+         "clockHour12", "clockSeconds", "clockMoon", "clockTick", "calendarWeekNumbers", "calendarHolidays", "iconOmens", "shPack"}
+# What an unset flag means, so `toggle` flips what the bar is actually showing.
+DEFAULT_ON = {"dockFloat", "formParity", "ccMotion", "presence", "userAssets", "iconOmens", "calendarWeekNumbers", "calendarHolidays", "panelFrame", "valueLabels", "showValues", "fxPlate", "fxCalm", "fxGrain", "fxBorder", "oneBar"}
+# S13f: the defaults registry (bar/modules/ito-defaults.json): { key: {default, page, section, kind, keep?, mirror?} }. A key ending
+# in `:*` is a family (icon:*, content:*). It is the one source of what "unset" means: `toggle`, `defaults` and every `reset` read it.
+def _registry():
+    p = os.environ.get("ITO_DEFAULTS_PATH") or os.path.join(os.environ.get("ITO_BIN_DIR") or os.path.dirname(os.path.realpath(__file__)), "..", "ito-defaults.json")
+    try:
+        with open(p) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+REGISTRY = _registry()
+
+def reg_entry(key):
+    if key in REGISTRY:
+        return REGISTRY[key]
+    for k, e in REGISTRY.items():
+        if k.endswith(":*") and key.startswith(k[:-1]):
+            return e
+    return None
+
+def reg_default_on(key):
+    e = reg_entry(key)
+    if e is not None and isinstance(e.get("default"), bool):
+        return e["default"]
+    return key in DEFAULT_ON
+
+def reg_keys(data, page=None, section=None):
+    """The stored keys a page / section reset removes (mirrors of real system files are never touched by a bulk reset)."""
+    out = []
+    for key in data:
+        e = reg_entry(key)
+        if e is None or e.get("mirror") or e["page"] == "hidden":
+            continue
+        if page is not None and e["page"] != page:
+            continue
+        if section is not None and e["section"] != section:
+            continue
+        out.append(key)
+    return out
+
+BACKUP_DIR = os.path.expanduser(os.environ.get("ITO_BACKUP_DIR") or "~/.config/ito/backups")
+
+def backup(data):
+    """Write the sidecar as it is now to backups/sidecar-<ts>.json and return <ts> (the last 30 are kept)."""
+    import time
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    n, name = 1, ts
+    while os.path.exists(os.path.join(BACKUP_DIR, f"sidecar-{name}.json")):
+        n += 1
+        name = f"{ts}-{n}"
+    with open(os.path.join(BACKUP_DIR, f"sidecar-{name}.json"), "w") as fh:
+        fh.write(json.dumps(data, indent=2) + "\n")
+    old = sorted(f for f in os.listdir(BACKUP_DIR) if f.startswith("sidecar-") and f.endswith(".json"))
+    for f in old[:-30]:
+        os.remove(os.path.join(BACKUP_DIR, f))
+    return name
+
+def backup_names():
+    try:
+        return sorted(f[8:-5] for f in os.listdir(BACKUP_DIR) if f.startswith("sidecar-") and f.endswith(".json"))
+    except OSError:
+        return []
+
+FLOATS = {"surfacePill", "surfaceWood", "surfaceVeins", "surfaceGrain", "surfaceTone", "surfaceCalm",
+          "surfaceOpacity", "iconScale", "wsArtScale", "markScale", "light", "vibrance", "fxSpeed", "fxStrength", "surfaceFog", "popupSeconds"}
+# openDuration: the main opening's length in ms (see ItoPresence.js OPEN); `set` clamps it to the range and snaps to the step
+OPEN_MIN, OPEN_MAX, OPEN_STEP = 150, 2400, 50
+
+def load():
+    try:
+        with open(PATH_) as fh:
+            return json.load(fh) or {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save(data):
+    # Write through a temp file so a reader never sees a half-written sidecar.
+    tmp = PATH_ + ".tmp"
+    text = json.dumps(data, indent=2) + "\n"
+    with open(tmp, "w") as fh:
+        fh.write(text)
+    with open(tmp) as fh:
+        assert fh.read() == text, "readback mismatch"
+    os.replace(tmp, PATH_)
+
+# Keys that only take one of a few words; anything else is refused instead of being stored.
+_SH = ("original", "sh")     # per-icon choice: today's icon or the Hollow one (`hollow` is accepted for `sh`)
+# T15 (S21): the indicator versions the Icons chooser writes (ItoIcons.js; the first is the Original)
+ENUMS = {"icon:notifications": _SH, "icon:clock": _SH, "icon:nightlight": _SH, "icon:power": _SH,
+         "icon:awake": ("coffee", "radio", "flashlight", "cup"), "icon:night": ("moon", "fog"), "icon:record": ("eye", "tape", "cassette"),
+         "lockDesign": ("fog", "spiral", "lantern", "horizon", "amigara", "watcher", "tomie", "pyramid", "road", "moth"),
+         "lockEngine": ("omarchy-lock", "ito-qs", "hyprlock"), "lockBg": ("engraved", "duotone", "raw", "screenshot", "ink"),
+         "fetchOrnaments": ("ito", "off"), "fetchLogo": ("omarchy", "eye", "picture"),
+         "fetchFrame": ("ito", "off"),
+         "fetchStyle": ("ito", "rust", "otherworld", "chains", "ink", "eyes"), "fetchPicture": ("photo", "engraving"),
+         "fetchPicturePolarity": ("auto", "lum", "print", "ink", "engrave"), "screensaverPalette": ("restrained", "classic"),
+         "screensaverText": ("spiral", "eye", "fog", "custom", "stock"), "screensaverGround": ("ink", "black"),
+         "bootSource": ("slot", "mark", "theme"), "bootComposition": ("eye-shut", "uzumaki-eye", "beetle", "remina", "tomie", "eye-veined", "eye-spiral", "card-tomie", "card-pyramid", "card-road", "card-moth", "picture", "seal", "caption"),
+         "bootFrame": ("none", "disc", "ring"), "bootTone": ("tint", "duotone", "raw"), "bootUi": ("bone", "accent"),
+         "fastfetchLayout": ("image", "compact", "text"),
+         "clockDate": ("off", "day", "weekday"), "clockNumerals": ("western", "kanji"),
+         "calendarWeekStart": ("locale", "monday", "sunday", "saturday"), "eyeStyle": ("shaded", "uzumaki", "lashed", "veined"),
+         "crestEye": ("auto", "heavy", "stare", "lidless", "spiral", "weeping", "poly", "slit"), "eyeMotion": ("off", "subtle", "full"), "loreLevel": ("off", "subtle", "full"),
+         "iconStyle": ("current", "manga", "gothic"), "markDef": ("v9", "v10"), "wsBeetleDef": ("v9", "v10"), "eyeWsIris": ("spiral", "plain"), "eyeWsCrop": ("tight", "wide"), "beetleDef": ("v12", "v10", "v9"), "iconTone": ("theme", "ink"),
+         "surfaceLayering": ("classic", "theme"), "motionScope": ("ito", "all"), "elevation": ("flat", "ink"),
+         "presenceReveal": ("none", "spiral", "blot", "lid", "static"), "presenceSwitch": ("reopen", "morph"),
+         "frameStyle": ("manga", "chains", "otherworld", "minimal"), "frameArt": ("png", "drawn"), "eyeArt": ("asset", "drawn"), "lockTone": ("sync", "flat"),
+         "surfaceWorld": ("off", "fog", "rust", "cage"), "vesselFill": ("blood", "whirlpool", "hair", "rust", "static", "tone")}
+# Keys that no longer exist: `set` refuses them (exit 1), `get`/`unset` still answer so old scripts do not crash.
+RETIRED = {"barDecor", "gapThread", "vesselEyes", "vesselLayout", "shMicro", "shSymbolsAlt", "wsBanners", "packUndo", "icon:media"}
+RETIRED_IN = {"vesselEyes": "S14", "vesselLayout": "S14", "shMicro": "the Hollow workspaces removal", "shSymbolsAlt": "the Hollow workspaces removal", "wsBanners": "the banners removal", "packUndo": "the preset packs removal", "icon:media": "the media cassette removal (T15)"}      # every other retired key went in S13a
+# Values that were renamed or removed in S14: `set` refuses them and names the new value; `migrate` rewrites a stored one.
+RENAMED = {"eyeStyle": {"real": "shaded", "ink": "shaded", "gekiga": "shaded"},
+           "surfaceWorld": {"flesh": "off (turn on Blood and Blood seep)"}}
+MIGRATE_VALUES = {"fxMark": {"pulse": "breathe", "glitch": "tear"}, "fxSeal": {"pulse": "breathe", "glitch": "tear"},
+                  "fxVeins": {"pulse": "breathe", "glitch": "tear"}, "mediaFx": {"eyes": "blood"}}
+# `calendarZones` stays a free string ("Tokyo=Asia/Tokyo, NYC=America/New_York"); the model validates it where it is used.
+
+def effect_names():
+    """random-ito, random-all, or any effect `ttfx` offers (asked of the sibling helper, which caches it per ttfx version)."""
+    import subprocess
+    try:
+        r = subprocess.run([os.path.join(os.environ.get("ITO_BIN_DIR", "."), "ito-screensaver"), "effects"],
+                           capture_output=True, text=True, timeout=15)
+        return ["random-ito", "random-all"] + json.loads(r.stdout).get("all", [])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return ["random-ito", "random-all"]
+
+
+ICON_FAMILIES = ("disk", "cpu", "mem", "battery", "network", "notifications", "audio", "display", "bluetooth", "tray", "ai", "media", "indicator", "sky")
+
+def icon_overrides(value):
+    """`iconStyleOverrides`: "ai=current, media=manga" -> the normalised "ai=current,media=manga" (the model parses it too, ItoIconMap.js)."""
+    out = {}
+    for part in str(value).split(","):
+        if not part.strip():
+            continue
+        kv = part.split("=")
+        if len(kv) != 2 or kv[0].strip().lower() not in ICON_FAMILIES or alias_value("iconStyle", kv[1].strip().lower()) not in ("current", "manga", "gothic"):
+            sys.exit(f"iconStyleOverrides takes family=current|ink|relic pairs (old ids manga|gothic too), families: {', '.join(ICON_FAMILIES)}")
+        out[kv[0].strip().lower()] = alias_value("iconStyle", kv[1].strip().lower())
+    if not out:
+        sys.exit("iconStyleOverrides is empty: use `unset iconStyleOverrides` to follow the global style")
+    return ",".join(f"{f}={out[f]}" for f in ICON_FAMILIES if f in out)
+
+
+# S24 (2026-10-22): the visible names Ink / Relic / Hollow are accepted as the values they show; the stored ids stay manga / gothic / sh,
+# so every existing setting keeps working unchanged.
+VALUE_ALIASES = {"iconStyle": {"ink": "manga", "relic": "gothic"}, "icon:*": {"hollow": "sh"}}
+
+
+def alias_value(key, value):
+    table = VALUE_ALIASES.get(key) or (VALUE_ALIASES["icon:*"] if str(key).startswith("icon:") else None)
+    return table.get(str(value).strip().lower(), value) if table else value
+
+
+def coerce(key, value):
+    value = alias_value(key, value)
+    if key in RETIRED:
+        sys.exit(f"{key} was removed in {RETIRED_IN.get(key, 'S13a')} and cannot be set")
+    if key in RENAMED and str(value) in RENAMED[key]:
+        sys.exit(f"use {RENAMED[key][str(value)]} (renamed in S14)")
+    if key in MIGRATE_VALUES and str(value) in MIGRATE_VALUES[key]:
+        sys.exit(f"use {MIGRATE_VALUES[key][str(value)]} (renamed in S14)")
+    if key == "iconStyleOverrides":
+        return icon_overrides(value)
+    if key == "screensaverEffect" and str(value) not in effect_names():
+        sys.exit(f"screensaverEffect must be random-ito, random-all or an effect ttfx offers")
+    if key == "screensaverFps":
+        try:
+            if not 30 <= int(value) <= 120:
+                raise ValueError
+        except ValueError:
+            sys.exit("screensaverFps must be a whole number from 30 to 120")
+    if key == "fetchFrameTitle":
+        import unicodedata
+        v = str(value)
+        width = sum(0 if unicodedata.combining(c) else (2 if unicodedata.east_asian_width(c) in "WF" else 1) for c in v)
+        if not v.strip() or width > 24 or any(unicodedata.category(c).startswith("C") for c in v):
+            sys.exit("fetchFrameTitle must be printable text of at most 24 columns (no control characters)")
+    if key == "openDuration":
+        try:
+            ms = float(value)
+        except ValueError:
+            sys.exit("openDuration is a number of milliseconds from 150 to 2400 (default 900)")
+        if ms != ms:
+            sys.exit("openDuration is a number of milliseconds from 150 to 2400 (default 900)")
+        return int(max(OPEN_MIN, min(OPEN_MAX, round(ms / OPEN_STEP) * OPEN_STEP)))
+    if key == "lockDesign" and str(value) in ("otherworld", "vortex", "weeper", "panel", "signpost"):
+        return "fog"        # removed lock designs: the old saved value maps to fog (`pyramid` and `moth` are the sheet scenes now)
+    if key in ENUMS and str(value) not in ENUMS[key]:
+        sys.exit(f"{key} must be one of: {', '.join(ENUMS[key])}")
+    if key in BOOLS:
+        return str(value).lower() in ("1", "true", "yes", "on")
+    if key in FLOATS:
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    if key in INTS:
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    return value
+
+args = sys.argv[1:]
+if not args:
+    sys.exit("usage: ito-config get|set|setmany|unset|toggle|reset|cycle|list ...")
+
+cmd = args[0]
+
+if cmd == "assets":     # `ito-config assets rescan`: re-read ~/.config/ito/assets into the index (the shell picks it up by itself)
+    if args[1:2] != ["rescan"]:
+        sys.exit("usage: ito-config assets rescan")
+    os.execv(os.path.join(os.environ.get("ITO_BIN_DIR") or os.path.dirname(os.path.realpath(__file__)), "ito-assets"),
+             ["ito-assets", "index"])
+
+# Every writer holds this lock from load to save, so overlapping writers (the control centre fires its sets
+# detached, and ito-lock apply --design calls `set` too) queue up instead of losing each other's update.
+# Readers need no lock: save() replaces the file atomically.
+_lock = None
+if cmd not in ("get", "list", "defaults", "backups"):
+    _lock = open(PATH_ + ".lock", "a")
+    fcntl.flock(_lock, fcntl.LOCK_EX)
+
+data = load()
+
+if cmd == "list":
+    for k, v in sorted(data.items()):
+        print(f"{k}={v}")
+elif cmd == "get":
+    key = args[1]
+    fallback = args[2] if len(args) > 2 else ""
+    print(data.get(key, fallback))
+elif cmd == "set":
+    key, value = args[1], args[2]
+    data[key] = coerce(key, value)
+    save(data)
+elif cmd == "reset":
+    # S13f. `reset` (= `reset --all`), `reset --key k...`, `reset --section PAGE/SECTION`, `reset --page PAGE`. Every form first writes
+    # backups/sidecar-<ts>.json and prints `ito-config restore <ts>`. --all keeps the colours, the lock/fetch/screensaver mirrors and the user's
+    # own content (`keep` in the registry, plus marksVer: a reset must never let the one-shot mark rename run again); the others take exactly
+    # what they name, even a kept key, except the mirrors of real system files (only `--key` can reset those).
+    opts = args[1:]
+    if opts[:1] == ["--key"] and len(opts) > 1:
+        drop = [k for k in data if k in opts[1:] or any(k.startswith(x[:-1]) for x in opts[1:] if x.endswith(":*"))]
+    elif opts[:1] == ["--page"] and len(opts) == 2:
+        drop = reg_keys(data, page=opts[1])
+    elif opts[:1] == ["--section"] and len(opts) == 2 and "/" in opts[1]:
+        pg, _, sec = opts[1].partition("/")
+        drop = reg_keys(data, page=pg, section=sec)
+    elif not opts or opts == ["--all"]:
+        keep = {"blood", "bloodLive", "lockTheme", "idleScreensaver", "fastfetchTheme", "lockDesign", "fastfetchLayout",
+                "lockEngine", "marksVer"}
+        drop = [k for k in data if k not in keep and not (reg_entry(k) or {}).get("keep") and not (reg_entry(k) or {}).get("mirror")]
+    else:
+        sys.exit("usage: ito-config reset [--all | --key k... | --section PAGE/SECTION | --page PAGE]")
+    drop = [k for k in drop if k in data]
+    if drop:
+        ts = backup(data)
+        for k in drop:
+            data.pop(k)
+        save(data)
+        print(f"reset {len(drop)}: {' '.join(sorted(drop))}")
+        print(f"restore with: ito-config restore {ts}")
+    else:
+        print("reset 0: already at the defaults")
+elif cmd == "restore":
+    # `restore [ts]`: put a backup back (no ts = the newest). The sidecar as it is now is backed up first, so a restore can be undone too.
+    names = backup_names()
+    want = args[1] if len(args) > 1 else (names[-1] if names else "")
+    if not want or want not in names:
+        sys.exit("no such backup (see `ito-config backups`)")
+    with open(os.path.join(BACKUP_DIR, f"sidecar-{want}.json")) as fh:
+        back = json.load(fh)
+    ts = backup(data)
+    save(back)
+    print(f"restored {want} (undo: ito-config restore {ts})")
+elif cmd == "backups":
+    for n in backup_names():
+        print(n)
+elif cmd == "defaults":
+    # `defaults [--page P] [--section S] [--json]`: the registry, one `key=default  page/section` line each
+    page = args[args.index("--page") + 1] if "--page" in args else None
+    sect = args[args.index("--section") + 1] if "--section" in args else None
+    rows = {k: e for k, e in sorted(REGISTRY.items()) if (page is None or e["page"] == page) and (sect is None or e["section"] == sect)}
+    if "--json" in args:
+        print(json.dumps(rows, indent=1, sort_keys=True))
+    else:
+        for k, e in rows.items():
+            print(f"{k}={'(unset)' if e['default'] is None else json.dumps(e['default']) if not isinstance(e['default'], str) else e['default']}  {e['page']}/{e['section']}")
+elif cmd == "unset":
+    # unset key key ... : back to the default of each one
+    for key in args[1:]:
+        data.pop(key, None)
+    save(data)
+elif cmd == "setmany":
+    # setmany key=value key=value ... : one write, so a preset lands in the bar as a single change
+    for pair in args[1:]:
+        key, _, value = pair.partition("=")
+        data[key] = coerce(key, value)
+    save(data)
+elif cmd == "migrate":
+    # S14, idempotent: the renamed eye (real/ink/gekiga -> shaded; an unknown value is dropped), the liquid's retired keys, the
+    # effect names that were merged or replaced. Prints what it changed, one `key old -> new` line each.
+    changed = []
+    ev = data.get("eyeStyle")
+    if ev is not None and ev not in ENUMS["eyeStyle"]:
+        if ev in RENAMED["eyeStyle"]:
+            data["eyeStyle"] = RENAMED["eyeStyle"][ev]
+            changed.append(f"eyeStyle {ev} -> shaded")
+        else:
+            data.pop("eyeStyle")
+            changed.append(f"eyeStyle {ev} -> (unset)")
+    if data.get("surfaceWorld") == "flesh":       # S13e/D3: the Flesh world is the Blood layer's seep now
+        data["fxBlood"], data["bloodSeep"] = True, True
+        data["surfaceVeins"] = max(float(data.get("surfaceVeins", 0.6) or 0), 0.45)
+        data.pop("surfaceWorld")
+        changed.append("surfaceWorld flesh -> fxBlood true, bloodSeep true, surfaceVeins %s (surfaceWorld unset)" % data["surfaceVeins"])
+    for key in ("vesselEyes", "vesselLayout", "wsBanners", "packUndo", "icon:media"):   # icon:media: the media cassette skin is gone (T15); media keeps its drawing
+        if key in data:
+            changed.append(f"{key} {data.pop(key)} -> (unset)")
+    for key, table in (("seal", {"red-square": "tomie", "pyramid-seal": "tomie", "heather-seal": "tomie"}), ("style", {"tomie-head": "tomie", "tomie-clear": "tomie", "tomie-wide": "tomie", "gothic": "symbols", "pyramid-classic": "pyramid"}), ("menuMark", {"tomie": "tomie-classic", "user:tomie": "tomie-classic", "user:tomie-classic": "tomie-classic", "tomie-head": "tomie-classic", "user:tomie-head": "tomie-classic", "tomie-clear": "tomie-classic", "tomie-wide": "tomie-classic"})):   # the head-crop family was removed (HD pass); the HD `tomie` mark left the picker (S9): Tomie Classic
+        if data.get(key) in table:
+            changed.append(f"{key} {data[key]} -> {table[data[key]]}")
+            data[key] = table[data[key]]
+    for key, table in MIGRATE_VALUES.items():
+        if data.get(key) in table:
+            changed.append(f"{key} {data[key]} -> {table[data[key]]}")
+            data[key] = table[data[key]]
+    if changed:
+        save(data)
+    for line in changed:
+        print(line)
+elif cmd == "migrate-marks":
+    # marksVer 2, one shot (ItoMarks.migrateMark has the same table): the old key names of the mark picker
+    if int(data.get("marksVer", 0) or 0) < 2:
+        table = {"remina": "remina-ink", "user:remina-real": "remina", "user:tomie": "tomie-classic",
+                 "user:beetle": "beetle", "user:uzumaki-eye": "uzumaki-eye"}
+        if data.get("menuMark") in table:
+            data["menuMark"] = table[data["menuMark"]]
+        data["marksVer"] = 2
+        save(data)
+    print(data.get("menuMark", ""))
+elif cmd == "toggle":
+    key = args[1]
+    data[key] = not coerce(key, data.get(key, reg_default_on(key)))
+    save(data)
+    print(str(data[key]).lower())
+elif cmd == "cycle":
+    key, options = args[1], args[2:]
+    if not options:
+        sys.exit("cycle needs at least one value")
+    current = str(data.get(key, options[0]))
+    nxt = options[(options.index(current) + 1) % len(options)] if current in options else options[0]
+    data[key] = coerce(key, nxt)
+    save(data)
+    print(nxt)
+else:
+    sys.exit(f"unknown command: {cmd}")
+PY

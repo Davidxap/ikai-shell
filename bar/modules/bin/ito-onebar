@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""ito-onebar — there is one bar on the screen, and it is this one.
+
+Two bars stacked on the same edge is never wanted: the second one pushes the first down, and the reserved
+space of both is lost to every window. It has happened by way of things that are nobody's fault in
+particular (a status bar left running from another shell, a switcher that reloads the compositor and
+re-runs an autostart line), so this is the one place that puts it right.
+
+    ito-onebar           stop every other bar that is running, and say which
+    ito-onebar --check   only report
+
+A second copy of this very shell (two quickshell processes, or two launcher loops) is a second bar too: the
+older copies are removed through ito-restart ensure, which keeps the newest.
+
+Only bars are touched, and only by name: Waybar and the other panels that draw a bar of their own, and the
+other Quickshell shells (Caelestia, Noctalia, DankMaterialShell) that would draw a second one. Nothing else.
+"""
+
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+LOG = Path.home() / ".local" / "state" / "ito" / "onebar.log"
+BARS = ["waybar", "hyprpanel", "eww", "nwg-panel", "yambar", "polybar", "ironbar", "sfwbar"]
+OTHER_QS = ("caelestia", "noctalia-shell", "dms")
+
+
+def find():
+    found = []
+    for name in BARS:
+        try:
+            r = subprocess.run(["pgrep", "-x", name], capture_output=True, text=True, timeout=5)
+        except subprocess.SubprocessError:
+            continue
+        found += [(name, int(p)) for p in r.stdout.split()]
+    try:
+        ps = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True, timeout=5).stdout
+    except subprocess.SubprocessError:
+        ps = ""
+    for line in ps.splitlines()[1:]:
+        pid, _, args = line.strip().partition(" ")
+        if args.startswith("quickshell") and any(f"-c {n}" in args for n in OTHER_QS):
+            found.append(("quickshell " + args.split("-c ")[1].split()[0], int(pid)))
+    return found
+
+
+RESTART = Path(__file__).resolve().parent / "ito-restart"
+COOLDOWN = Path.home() / ".local" / "state" / "ito" / "onebar.cooldown"
+
+
+def bar_layers():
+    """How many bar windows each monitor has. More than one is a second bar drawn by the same shell: the engine
+    reloads a plugin when its files change (a deploy, an edit) and can leave the old generation's window behind."""
+    try:
+        data = json.loads(subprocess.run(["hyprctl", "layers", "-j"], capture_output=True, text=True, timeout=5).stdout)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return {}
+    out = {}
+    for mon, levels in data.items():
+        n = sum(1 for lv in levels.get("levels", {}).values() for item in lv if item.get("namespace") == "ito-bar")
+        if n:
+            out[mon] = n
+    return out
+
+
+def own_copies():
+    try:
+        st = json.loads(subprocess.run([str(RESTART), "status"], capture_output=True, text=True, timeout=10).stdout)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+    out = []
+    if st.get("shells", 0) > 1:
+        out.append(f"{st['shells']} copies of this shell")
+    if st.get("launchers", 0) > 1:
+        out.append(f"{st['launchers']} launcher loops")
+    for mon, n in bar_layers().items():
+        if n > 1:
+            out.append(f"{n} bar windows on {mon}")
+    return out
+
+
+def main() -> int:
+    found = find()
+    copies = own_copies()
+    stopped = []
+    if "--check" not in sys.argv:
+        for name, pid in found:
+            subprocess.run(["kill", "-TERM", str(pid)], check=False)
+            stopped.append(name)
+        if stopped:
+            time.sleep(1.5)
+            for _, pid in found:
+                if subprocess.run(["kill", "-0", str(pid)], capture_output=True).returncode == 0:
+                    subprocess.run(["kill", "-KILL", str(pid)], check=False)
+            LOG.parent.mkdir(parents=True, exist_ok=True)
+            with LOG.open("a") as fh:
+                fh.write(f"{time.strftime('%F %T')} stopped {', '.join(stopped)}\n")
+        if copies:
+            # extra processes are removed in place; extra windows of one process only go away with a restart, which
+            # is started detached (this guard runs inside the shell it is about to restart) and at most once a minute
+            subprocess.run([str(RESTART), "ensure"], stdout=subprocess.DEVNULL, check=False)
+            if any("bar windows" in c for c in copies):
+                recent = COOLDOWN.exists() and time.time() - COOLDOWN.stat().st_mtime < 60
+                if not recent:
+                    COOLDOWN.parent.mkdir(parents=True, exist_ok=True)
+                    COOLDOWN.touch()
+                    subprocess.Popen(["setsid", "-f", str(RESTART)], stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True)
+            stopped += copies
+            LOG.parent.mkdir(parents=True, exist_ok=True)
+            with LOG.open("a") as fh:
+                fh.write(f"{time.strftime('%F %T')} removed {', '.join(copies)}\n")
+    json.dump({"other": [n for n, _ in found] + copies, "stopped": stopped}, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

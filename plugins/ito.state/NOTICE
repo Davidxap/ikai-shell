@@ -1,0 +1,6 @@
+This folder is a FORK of Shibumi-Shell by HANCORE (MIT), https://github.com/HANCORE-linux/Shibumi-Shell
+(the plugin hancore.shibumi.state). Copyright (c) 2026 HANCORE. Its licence is in LICENSE next to this file.
+
+It is mostly HANCORE's code: measured against the original, about 98% of the lines are the same. What IKAI
+changed: the plugin id and namespace (ito.*), the `itoverse` visual style, room for more widgets per side, and a few
+fixes. The layout engine, the drag-and-drop, the two layouts and the saved state are HANCORE's work.

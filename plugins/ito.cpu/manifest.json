@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.cpu",
+  "name": "Ito CPU",
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "davidxap",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "CPU load; the chip heats with use.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito CPU",
+    "description": "CPU load; the chip heats with use.",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

@@ -1,0 +1,305 @@
+#!/usr/bin/env python3
+"""ito-design — put the bar into a whole design (a shape and where every widget sits), safely.
+
+The bar engine keeps the arrangement in three places that have to agree: the state's V1 order (the island
+form), its V2 slots (the screen-edge forms) and the host layout in shell.json. Changing them one at a time
+while the shell runs races with the engine's own reconciliation, and a half-applied design loses widgets
+(the seal, once). So a design is applied the one way that is always consistent: the shell is stopped, all
+three are written together from one description, and the shell is started again. It takes a few seconds and
+the bar comes back exactly as described.
+
+Widgets a design leaves out are switched off, not removed: they keep a place at the end of the right side,
+so switching them on again (or choosing another design) brings them back. The seal is never left out.
+
+    ito-design --form fit --left a,b --center c,d --right e,f     apply a design
+    ito-design --form dock --classic                              the default arrangement, in this shape
+    ito-design --dry-run ...                                      print what would be written
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+OMARCHY = HOME / ".config" / "omarchy"
+SHELL_JSON = OMARCHY / "shell.json"
+MODULES = Path(__file__).resolve().parent.parent
+LAYOUT_JSON = MODULES / "ito-layout.json"
+PLUGINS = OMARCHY / "plugins"
+
+# the fork's base groups: a layout is only valid with all of them present (see itobar-layout.py)
+V1_BASE = {"left": ["G1", "G2", "G3", "G4", "G5", "G6", "G7"], "center": ["G8"],
+           "right": ["G9", "G10", "G11", "G14", "G12", "G13", "G15"]}
+V2_BASE = {"left": ["G1", "G2", "G3", "G5", "G6", "G4", "G7"], "center": ["G8"],
+           "right": ["G9", "G10", "G11", "G14", "G12", "G13", "G16", "G18", "G17", "G15"]}
+V2_FLOOR = {"left": 10, "center": 1, "right": 7}
+FORMS = ("shibumi", "full", "fit", "dock", "notch")
+SIDES = ("left", "center", "right")
+SEAL = "ito.tomie"
+
+
+def repo_root():
+    for cand in (os.environ.get("ITO_REPO"), (HOME / ".config/ito/repo").read_text().strip()
+                 if (HOME / ".config/ito/repo").exists() else None,
+                 str(Path(__file__).resolve().parents[3])):   # a run from the repo checkout itself (install.sh marks a checkout)
+        if cand and (Path(cand) / "plugins").is_dir() and (Path(cand) / "install.sh").is_file():
+            return Path(cand)
+    return None
+
+
+def restore_missing_plugins(ids):
+    """A widget whose folder has gone cannot be shown, and the engine then drops it from the layout for
+    good. Bring back any IKAI plugin folder that has disappeared, from the repository."""
+    root = repo_root()
+    restored = []
+    for wid in ids:
+        if (PLUGINS / wid).is_dir() or root is None or not wid.startswith(("ito.",)):
+            continue
+        src = root / "plugins" / wid
+        if src.is_dir():
+            shutil.copytree(src, PLUGINS / wid)
+            restored.append(wid)
+    return restored
+
+
+def build(cfg, form, arrangement, everything):
+    """Rewrite the three stores in place from one arrangement.
+
+    `everything` is every widget that should keep a place even when this arrangement leaves it out. A
+    third-party widget that has just been added is not in that list, so it is taken from the arrangement
+    itself: the bar hosts any registered plugin, whoever wrote it.
+    """
+    everything = list(dict.fromkeys(list(everything) + [i for s in SIDES for i in arrangement[s]]))
+    entry = next((p for p in cfg["plugins"] if isinstance(p, dict) and p.get("id") == "ito.state"), None)
+    if entry is None:
+        sys.exit("ito-design: the target has no ito.state plugin entry -- the live shell is not on IKAI "
+                  "(run `scripts/shell-switch ito` first, or pass --file to target a different shell.json).")
+    ito = entry.setdefault("ito", {"version": 1})
+    entry.setdefault("itoStateSchemaVersion", 1)
+
+    used = [i for s in SIDES for i in arrangement[s]]
+    if SEAL not in used:                                   # the seal is the way back in: never left out
+        arrangement["center"].append(SEAL)
+        used.append(SEAL)
+    hidden = [i for i in everything if i not in used]
+    full = {s: list(arrangement[s]) for s in SIDES}
+    full["right"] += hidden                                # switched off, but they keep a place
+
+    dyn = {s: ["G:" + i for i in full[s]] for s in SIDES}
+    order = {s: V1_BASE[s] + dyn[s] for s in SIDES}
+    ito["order"] = order
+    ito["v1SlotRoles"] = {s: ["base"] * len(V1_BASE[s]) + ["extra"] * len(dyn[s]) for s in SIDES}
+    ito["splits"] = {"left": [False] * max(0, len(order["left"]) - 1), "boundaries": [False, False],
+                     "right": [False] * max(0, len(order["right"]) - 1)}
+    v2 = {s: V2_BASE[s] + dyn[s] for s in SIDES}
+    for s in SIDES:
+        while len(v2[s]) < V2_FLOOR[s]:
+            v2[s].append("")
+    ito["v2Layout"] = v2
+    ito["v2Boundaries"] = [False, False]
+
+    widgets = ito.setdefault("widgets", {})
+    for wid in everything:
+        group = widgets.setdefault("G:" + wid, {})
+        group["enabledV1"] = group["enabledV2"] = wid in used
+
+    pres = ito.setdefault("presentation", {})
+    pres["shellStyle"] = form
+    if form != "shibumi":
+        pres["v2ShellStyle"] = form
+
+    bar = cfg.setdefault("bar", {})
+    bar["layout"] = {s: [{"id": i, "shibumiModule": True} for i in full[s]] for s in SIDES}
+    bar["centerAnchor"] = SEAL
+    return used, hidden
+
+
+def state_entry(cfg):
+    entry = next((p for p in cfg.get("plugins", []) if isinstance(p, dict) and p.get("id") == "ito.state"), None)
+    if entry is None:
+        sys.exit("ito-design: the target has no ito.state plugin entry -- the live shell is not on IKAI.")
+    return entry.setdefault("ito", {"version": 1})
+
+
+def splice(cfg, old, news, side="right"):
+    """Change the bar in place, keeping everything else exactly as it is (the island cuts included).
+
+    `old` is replaced by `news` where it stands (news empty removes it); with `old` = "" the `news` are added at the end
+    of `side`. Rebuilding the whole state for one widget, as build() does, reset every cut between the islands."""
+    ito = state_entry(cfg)
+    order, roles, splits = ito.get("order", {}), ito.get("v1SlotRoles", {}), ito.get("splits", {})
+    v2, widgets = ito.get("v2Layout", {}), ito.setdefault("widgets", {})
+    layout = cfg.setdefault("bar", {}).setdefault("layout", {s: [] for s in SIDES})
+    news = [n for n in news if not any("G:" + n in order.get(s, []) for s in SIDES)]
+    touched = False
+    for s in SIDES:
+        slots = order.get(s, [])
+        key = "G:" + old if old else None
+        if key and key in slots:
+            i = slots.index(key)
+            slots[i:i + 1] = ["G:" + n for n in news]
+            if s in roles and len(roles[s]) >= i + 1:
+                roles[s][i:i + 1] = [roles[s][i]] * len(news)
+            sp = splits.get(s)
+            if sp is not None:
+                if news:
+                    sp[i:i] = [False] * (len(news) - 1)
+                elif sp:
+                    j = min(i, len(sp) - 1)
+                    keep = sp[j] or (j > 0 and sp[j - 1])
+                    del sp[j]
+                    if j > 0 and keep:
+                        sp[j - 1] = True
+            touched = True
+        elif not old and s == side and news:
+            slots.extend("G:" + n for n in news)
+            if s in roles:
+                roles[s].extend(["extra"] * len(news))
+            if splits.get(s) is not None:
+                splits[s].extend([False] * len(news))
+            touched = True
+        vs = v2.get(s)
+        if vs is not None:
+            if key and key in vs:
+                k = vs.index(key)
+                vs[k:k + 1] = ["G:" + n for n in news]
+            elif not old and s == side and news:
+                vs.extend("G:" + n for n in news)
+        entries = layout.setdefault(s, [])
+        ids = [e.get("id") if isinstance(e, dict) else e for e in entries]
+        if old and old in ids:
+            k = ids.index(old)
+            entries[k:k + 1] = [{"id": n, "shibumiModule": True} for n in news]
+        elif not old and s == side and news:
+            entries.extend({"id": n, "shibumiModule": True} for n in news)
+    was = widgets.get("G:" + old, {}) if old else {}
+    for n in news:
+        widgets["G:" + n] = {"enabledV1": was.get("enabledV1", True) is not False,
+                             "enabledV2": was.get("enabledV2", True) is not False}
+    return touched
+
+
+RESTART = Path(__file__).resolve().parent / "ito-restart"
+
+
+def stop_shell():
+    """Stop the launcher loop and every shell, and wait until they are gone (see ito-restart for why the loop
+    must go first: killing only quickshell makes the loop start another, and a second start then gives two bars)."""
+    subprocess.run([str(RESTART), "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
+def one_bar():
+    """A second bar on the same edge is never wanted, so no start of ours leaves one behind."""
+    helper = Path(__file__).resolve().parent / "ito-onebar"
+    if helper.exists():
+        subprocess.run([str(helper)], stdout=subprocess.DEVNULL, check=False)
+
+
+def start_shell():
+    one_bar()
+    # detached, so the shell does not die with us; ito-restart leaves exactly one shell and one loop
+    subprocess.Popen([str(RESTART), "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     stdin=subprocess.DEVNULL, start_new_session=True)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--form", default="shibumi", choices=FORMS)
+    ap.add_argument("--left", default="")
+    ap.add_argument("--center", default="")
+    ap.add_argument("--right", default="")
+    ap.add_argument("--classic", action="store_true", help="the default arrangement")
+    ap.add_argument("--add", help="put this plugin on the bar, keeping everything else where it is")
+    ap.add_argument("--remove", help="take this plugin off the bar")
+    ap.add_argument("--side", default="right", choices=SIDES, help="which side --add puts it on")
+    ap.add_argument("--split-indicators", action="store_true",
+                    help="replace the combined indicators widget by stay awake, night light and recording, in its place")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--no-restart", action="store_true")
+    ap.add_argument("--file", help="write this config instead of the live shell.json, and do not restart")
+    a = ap.parse_args()
+
+    try:
+        default = json.loads(LAYOUT_JSON.read_text())
+    except (OSError, ValueError) as e:
+        sys.exit(f"ito-design: cannot read {LAYOUT_JSON}: {e}")
+    everything = [i for s in SIDES for i in default[s]]
+    if a.add or a.remove or a.split_indicators:
+        pass
+    elif a.classic:
+        # the default: everything has a place, but what is listed as hidden is switched off until wanted
+        off = set(default.get("hidden", []))
+        arrangement = {s: [i for i in default[s] if i not in off] for s in SIDES}
+    else:
+        arrangement = {s: [i for i in getattr(a, s).split(",") if i] for s in SIDES}
+
+    target = Path(a.file) if a.file else SHELL_JSON
+    try:
+        cfg = json.loads(target.read_text())
+    except (OSError, ValueError) as e:
+        sys.exit(f"ito-design: cannot read {target}: {e}")
+
+    if a.add or a.remove or a.split_indicators:
+        # Keep the bar exactly as it is and change one widget, so adding a plugin never rearranges the rest
+        # (nor resets the cuts between the islands).
+        if a.split_indicators:
+            changed = splice(cfg, "ito.indicators", ["ito.awake", "ito.nightlight", "ito.recording"])
+        elif a.remove:
+            changed = splice(cfg, a.remove, [])
+        else:
+            changed = splice(cfg, "", [a.add], a.side)
+        print("changed" if changed else "nothing to change")
+        if a.dry_run or not changed:
+            return 0
+        live = target == SHELL_JSON and not a.no_restart
+        if live:
+            stop_shell()
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(cfg, indent=1))
+        os.replace(tmp, target)
+        print("wrote", target)
+        if live:
+            start_shell()
+        return 0
+
+    if False:
+        layout = cfg.get("bar", {}).get("layout", {})
+        arrangement = {s: [e if isinstance(e, str) else e.get("id", "") for e in layout.get(s, []) if e]
+                       for s in SIDES}
+        entry = next((p for p in cfg["plugins"] if isinstance(p, dict) and p.get("id") == "ito.state"), {})
+        states = entry.get("ito", {}).get("widgets", {})
+        # widgets that are only switched off still sit in the layout; keep that distinction
+        for s in SIDES:
+            arrangement[s] = [i for i in arrangement[s]
+                              if states.get("G:" + i, {}).get("enabledV1", True) is not False]
+        if a.remove:
+            for s in SIDES:
+                arrangement[s] = [i for i in arrangement[s] if i != a.remove]
+        if a.add and not any(a.add in arrangement[s] for s in SIDES):
+            arrangement[a.side].append(a.add)
+        a.form = str(entry.get("ito", {}).get("presentation", {}).get("shellStyle") or a.form)
+    used, hidden = build(cfg, a.form, arrangement, everything)
+    print(f"form={a.form} shown={len(used)} hidden={len(hidden)}")
+    if a.dry_run:
+        return 0
+
+    live = target == SHELL_JSON and not a.no_restart
+    if live:
+        stop_shell()
+        for wid in restore_missing_plugins(everything):
+            print("restored missing plugin:", wid)
+    tmp = target.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg, indent=1))
+    os.replace(tmp, target)
+    print("wrote", target)
+    if live:
+        start_shell()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

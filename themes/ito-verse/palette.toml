@@ -1,0 +1,87 @@
+# Ito-verse palette — THE single source of truth for every color in the theme.
+#
+# Do not hand-edit colors.toml or shell.toml: they are generated from this file
+# by scripts/gen-palette.py. Historically the same "Ito red" was written by hand
+# in three places that disagreed (#a83859 / #ff2b4d / #6d1d1d). This file exists
+# so that never happens again.
+#
+# The blood ramp is a single hue. Each stop is assigned by CONTRAST ROLE, not by
+# taste: paint stops fill shapes, ui stops draw borders, text stops carry glyphs.
+
+[base]
+ink  = "#0e0e11"   # background
+bone = "#d6d3cb"   # foreground
+
+[blood]
+# Ramp anchor chosen by the user. Everything else is derived from its hue.
+base = "#651817"
+
+# Derived stops. Values are generated; see scripts/gen-palette.py --check.
+deep   = "#3f0f0e"   # shading, vein, depth under seals
+paint  = "#651817"   # = base. Fills, seals, spiral, splatter, heat overlays
+ui     = "#b72b2a"   # accent, borders, cursor            (>= 3.0:1 on ink)
+focus  = "#c72f2d"   # bar active indicator, focused ws    (>= 3.0:1 on ink)
+text   = "#d95a59"   # ANSI red / color1                   (>= 4.5:1 on ink)
+bright = "#e17b7a"   # ANSI bright red / color9            (>= 4.5:1 on ink)
+
+[muted]
+# Everything that is not blood stays a warm, desaturated gray. Only red is alive.
+green   = "#7d8a7a"
+yellow  = "#a89a7d"
+blue    = "#6f7f8f"
+magenta = "#8f6f7d"
+cyan    = "#6f8a8f"
+orange  = "#a06a5a"
+brown   = "#6b5a4e"
+
+[surfaces]
+lighter_bg = "#1a1a1f"
+dark_bg    = "#0a0a0c"
+darker_bg  = "#060607"
+light_fg   = "#ece9e2"
+bright_fg  = "#f2efe8"
+dark_fg    = "#a3a3a0"
+muted_fg   = "#8a8a86"
+
+[style]
+# Opacity and weight knobs for the generated shell surfaces. Colors always come
+# from the ramp above; these decide how much of them you actually see.
+bar_alpha          = 1.0
+popup_alpha        = 1.0
+tooltip_alpha      = 0.97
+scrim_alpha        = 0.62   # full-screen dim behind launcher/menu/polkit cards
+card_alpha         = 0.96   # launcher/menu card itself
+lock_alpha         = 0.82
+border_width       = 2      # popups and notification cards
+selected_fill      = 0.90   # blood paint under a selected row (bone stays legible)
+unselected_border  = 0.24
+control_fill       = 0.05
+control_hover_fill = 0.10
+control_border     = 0.35
+
+[assets]
+# Knobs for scripts/gen-assets.py, which derives the bar artwork from the design sheet.
+#
+# The baked reds in the sheet measure around 97% saturation, far hotter than the palette.
+# Reds are re-tinted onto the ramp hue at red_saturation, keeping each pixel's own
+# lightness so the shading and the grain survive.
+content_fraction = 0.94   # how much of the canvas the trimmed art fills
+canvas           = 64     # output size, matches what the modules load
+red_hue          = 352    # the sheet's own crimson (#cc0727 is H 350); brick (H 0) read wrong
+red_saturation   = 0.90
+red_max_lightness = 0.46  # cap highlights: a light red is pink
+red_min_channel  = 45     # ignore near-black pixels when detecting red
+red_dominance    = 1.35   # r must exceed g and b by this factor to count as red
+# An icon's filename caption is erased when the detached bottom blob is at least this
+# many times wider than tall; the Tomie seal's second character is far squarer.
+caption_aspect   = 3.0
+
+[bar]
+# Geometry for shell.toml. Colors come from the ramp above.
+size_horizontal = 36
+size_vertical   = 30
+icon_slot       = 30
+icon_canvas     = 20
+icon_font       = 14
+status_slot     = 23
+font_base_size  = 12

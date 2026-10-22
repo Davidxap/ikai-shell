@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.display",
+  "name": "Ito Display",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author": "Omarchy (re-skinned by davidxap)",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Brightness slider and laptop display controls",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Display",
+    "description": "Brightness slider and laptop display controls",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.audio",
+  "name": "Ito Audio",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author": "Omarchy (re-skinned by davidxap)",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Volume slider, output picker, per-app mixer",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Audio",
+    "description": "Volume slider, output picker, per-app mixer",
+    "category": "Audio",
+    "allowMultiple": false
+  }
+}

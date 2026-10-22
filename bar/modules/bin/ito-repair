@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""ito-repair — a guided repair of the Boot & Lock surfaces. YOU run it; nothing here runs by itself.
+
+  ito-repair plan                     read-only: every problem found and the exact change that would fix it (as a diff)
+  ito-repair apply [--yes] [step...]  interactive: shows each diff, asks y/N, backs the file up, applies, re-checks
+  ito-repair undo                     puts back what the last `apply` changed (refuses when a file changed since)
+
+Steps: hypridle (dead lock line), plugin (dangling lock plugin in shell.json), paths (every lock path reaches the lock in charge:
+the ~/.local/bin wrapper, hypridle lock_cmd / before_sleep_cmd and the duplicate 300 s listener), owner (who locks), screensaver
+(one idle timer), boot (explains the boot splash; the Apply button does the work).
+Backups: ~/.config/ito/backups/<date>-repair/. Test overrides: HOME, ITO_REPAIR_BIN, ITO_REPAIR_OFFLINE=1.
+`--yes` only skips the question for the two file edits; owner and boot are never run non-interactively.
+"""
+import difflib, hashlib, json, os, re, shutil, subprocess, sys, time
+from pathlib import Path
+
+HOME = Path(os.environ.get("HOME", "~")).expanduser()
+BIN = Path(os.environ.get("ITO_REPAIR_BIN") or Path(__file__).resolve().parent)
+OFFLINE = os.environ.get("ITO_REPAIR_OFFLINE") == "1"
+HYPRIDLE = HOME / ".config/hypr/hypridle.conf"
+SHELL_JSON = HOME / ".config/omarchy/shell.json"
+BACKUPS = HOME / ".config/ito/backups"
+DEAD_PLUGIN = "io.github.sirjul1337.lock-explorer"
+STEPS = ["hypridle", "plugin", "paths", "owner", "screensaver", "boot"]
+WRAPPER = HOME / ".local/bin/omarchy-system-lock"
+STYLE = HOME / ".config/omarchy/bar/modules/ito-style.json"
+LAST = BACKUPS / "repair-last.json"
+
+
+def sha(t): return hashlib.sha1(t.encode()).hexdigest()[:12]
+def read(p):
+    try: return Path(p).read_text()
+    except OSError: return None
+def say(s=""): print(s, flush=True)
+def die(s): say("ito-repair: " + s); sys.exit(1)
+
+
+def helper_status(name):
+    try:
+        r = subprocess.run([str(BIN / name), "status"], capture_output=True, text=True, timeout=60)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("{")]
+        return json.loads(lines[-1]) if lines else {}
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {}
+
+
+def lock_cmd():
+    mine = HOME / ".local/bin/omarchy-system-lock"
+    return str(mine) if mine.is_file() else "/usr/share/omarchy/bin/omarchy-system-lock"
+
+
+# ---- step 1: the dead `hyprctl dispatch exec` line -------------------------------------------------------------
+DEAD_RE = re.compile(r"^(\s*on-timeout\s*=\s*pidof hyprlock \|\| )hyprctl dispatch exec\s+(\S+)\s*$", re.M)
+
+def fix_hypridle():
+    cur = read(HYPRIDLE)
+    if cur is None: return None
+    new = DEAD_RE.sub(lambda m: m.group(1) + (lock_cmd() if m.group(2).startswith("omarchy-system-lock") else m.group(2)), cur)
+    return (cur, new) if new != cur else None
+
+
+# ---- step 2: the dangling plugin entry -------------------------------------------------------------------------
+ENTRY_RE = re.compile(r'\n[ \t]*\{\s*"id"\s*:\s*"' + re.escape(DEAD_PLUGIN) + r'"\s*\},?')
+
+def fix_plugin():
+    cur = read(SHELL_JSON)
+    if cur is None: return None
+    try: data = json.loads(cur)
+    except ValueError: return None
+    plugins = data.get("plugins")
+    if not isinstance(plugins, list) or {"id": DEAD_PLUGIN} not in plugins: return None
+    if (Path(os.environ.get("ITO_REPAIR_PLUGINS") or HOME / ".config/omarchy/plugins") / DEAD_PLUGIN).exists(): return None
+    ms = ENTRY_RE.findall(cur)
+    if len(ms) != 1: return None
+    new = ENTRY_RE.sub("", cur, count=1)
+    try: back = json.loads(new)
+    except ValueError: return None
+    want = dict(data); want["plugins"] = [p for p in plugins if p != {"id": DEAD_PLUGIN}]
+    if back != want: return None                      # the text edit must equal the intended JSON edit, nothing else
+    return (cur, new)
+
+
+# ---- step 3: every lock path must reach the lock in charge ---------------------------------------------------------
+# `own` already made the chosen lock the engine, but three paths can still run hyprlock: a ~/.local/bin wrapper that shadows
+# the stock omarchy-system-lock, hypridle's lock_cmd / before_sleep_cmd, and a 300 s listener that duplicates Omarchy's own idle lock.
+LOCK_LINE_RE = re.compile(r"^(\s*(?:lock_cmd|before_sleep_cmd)\s*=\s*)pidof hyprlock \|\| hyprlock\s*$", re.M)
+LISTENER_RE = re.compile(r"(?:^#[^\n]*\n)?^listener\s*\{[^{}]*?timeout\s*=\s*300\b[^{}]*?on-timeout[^\n]*(?:omarchy-system-lock|hyprlock)[^\n]*\n[^{}]*?\}[ \t]*\n?", re.M)
+
+def engine_wanted():
+    try: return str(json.loads(read(STYLE) or "{}").get("lockEngine") or "")
+    except ValueError: return ""
+
+def omarchy_idle_locks():
+    """True when Omarchy's own idle already locks at 300 s (the duplicate scheduler `ito-lock chain` reports)."""
+    if OFFLINE and not (BIN / "ito-lock").exists(): return False
+    try:
+        r = subprocess.run([str(BIN / "ito-lock"), "chain"], capture_output=True, text=True, timeout=60)
+        lines = [l for l in r.stdout.splitlines() if l.startswith("{")]
+        return any("two schedulers" in c for c in json.loads(lines[-1]).get("conflicts", [])) if lines else False
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return False
+
+def fix_paths():
+    """{"hypridle": (cur, new) | None, "wrapper": (path, disabled_path) | None} when the lock in charge is not ito-qs-reachable, else None."""
+    if engine_wanted() != "ito-qs": return None
+    res = {"hypridle": None, "wrapper": None}
+    cur = read(HYPRIDLE)
+    if cur is not None:
+        new = LOCK_LINE_RE.sub(lambda m: m.group(1) + "omarchy-system-lock", cur)
+        if omarchy_idle_locks(): new = LISTENER_RE.sub("", new)
+        if new != cur: res["hypridle"] = (cur, new)
+    if WRAPPER.is_file() and "hyprlock" in (read(WRAPPER) or ""):
+        res["wrapper"] = (WRAPPER, WRAPPER.with_name(WRAPPER.name + ".ito-disabled"))
+    return res if any(res.values()) else None
+
+
+def diff(path, a, b):
+    return "".join(difflib.unified_diff(a.splitlines(True), b.splitlines(True), f"{path} (now)", f"{path} (after)", n=2))
+
+
+def restart_hypridle():
+    """Stops the hypridle of THIS user by pid (not by name) and starts a fresh one, detached."""
+    if OFFLINE: return "skipped (offline)"
+    r = subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "hypridle"], capture_output=True, text=True)
+    for pid in r.stdout.split():
+        try: os.kill(int(pid), 15)
+        except (OSError, ValueError): pass
+    time.sleep(0.4)
+    subprocess.Popen(["setsid", "hypridle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True)
+    return "restarted"
+
+
+# ---- problems ----------------------------------------------------------------------------------------------------
+def problems():
+    out = []
+    h = fix_hypridle()
+    out.append(("hypridle", "hypridle.conf: the 300 s lock goes through `hyprctl dispatch exec`, which this Hyprland does not run", h and (HYPRIDLE, h)))
+    p = fix_plugin()
+    out.append(("plugin", f"shell.json lists the lock plugin {DEAD_PLUGIN}, whose folder is not installed", p and (SHELL_JSON, p)))
+    pth = fix_paths()
+    out.append(("paths", "some lock paths still run hyprlock: " + ", ".join(
+        (["the ~/.local/bin/omarchy-system-lock wrapper"] if pth and pth["wrapper"] else []) +
+        (["hypridle.conf (lock_cmd, before_sleep_cmd or the duplicate 300 s listener)"] if pth and pth["hypridle"] else [])) if pth else "", pth))
+    lk, ss, bt = ({} if OFFLINE and not (BIN / "ito-lock").exists() else helper_status(n) for n in ("ito-lock", "ito-screensaver", "ito-plymouth"))
+    codes = {i.get("code") for i in lk.get("issues", [])}
+    own = bool(codes & {"chain_mixed", "not_in_charge"}) and engine_wanted() != "ito-qs"      # `own` already ran: `paths` is the next step
+    out.append(("owner", f"the lock is in charge of {lk.get('in_charge', '?')} of 4 lock paths (hyprlock and Omarchy's own lock are mixed)" if own else "", own))
+    two = any(i.get("code") == "two_screensavers" for i in ss.get("issues", []))
+    out.append(("screensaver", (f"two screensavers: Omarchy's at {ss.get('omarchy_timer')} s and ours at {ss.get('idle_timeout')} s") if two else "", two))
+    st = bt.get("state")
+    out.append(("boot", f"boot splash is '{st}'" if st != "on" else "", st != "on"))
+    return out
+
+
+def cmd_plan():
+    say("ito-repair plan (read-only; nothing is changed)\n")
+    n = 0
+    for step, text, fix in problems():
+        if not fix: continue
+        n += 1
+        say(f"[{step}] {text}")
+        if isinstance(fix, tuple):
+            path, (a, b) = fix
+            say(diff(path, a, b).rstrip() + "\n  then: restart hypridle (by pid)\n" if step == "hypridle" else diff(path, a, b).rstrip() + "\n")
+        elif step == "paths":
+            if fix["wrapper"]: say(f"  rename {fix['wrapper'][0]}  ->  {fix['wrapper'][1].name}   (the stock omarchy-system-lock then runs the lock in charge)")
+            if fix["hypridle"]: say(diff(HYPRIDLE, *fix["hypridle"]).rstrip())
+            say("  Omarchy's own idle already locks at 300 s, so the duplicate listener goes; hypridle is restarted by pid.")
+            say("  KEEP ANOTHER TTY OPEN (Ctrl+Alt+F3) the first time. Undo: `ito-repair undo`.\n")
+        elif step == "owner":
+            say("  Options: A) Omarchy's lock themed, B) Ito's own lock (ito-qs, recommended: menu, idle, lid and keybind all show it),")
+            say("  C) hyprlock everywhere. Offered: `ito-lock own ito-qs` (prints its own diff, asks, backs up).")
+            say("  KEEP ANOTHER TTY OPEN (Ctrl+Alt+F3) the first time: if a lock misbehaves you can log in there and run `ito-lock own --undo`.\n")
+        elif step == "screensaver":
+            say("  Pick ONE timer. Default: keep Omarchy's (150 s): `ito-screensaver use-omarchy-timer` removes only our hypridle block.")
+            say("  (To keep ours instead, set Omarchy's idle screensaver off in its settings; ito-repair does not touch that.)\n")
+        elif step == "boot":
+            cmd = ["omarchy-plymouth-set", "<bg>", "<text>", "<composed logo>"]
+            say("  'never applied' / 'out of date' = Omarchy's own Plymouth is still installed; ours is only composed.")
+            say("  The Apply button runs, in a terminal, `" + str(BIN / "ito-plymouth") + " apply`, which asks and then runs (sudo inside):")
+            say("    " + " ".join(cmd) + "   (rebuilds the initramfs, also changes the SDDM login logo)")
+            say("  Undo: `ito-plymouth reset`. ito-repair never runs this: press Apply in the page.\n")
+    if n == 0: say("Nothing to repair.")
+    else: say(f"{n} item(s). Run `ito-repair apply` to go through them one by one.")
+
+
+def ask(q):
+    if not sys.stdin.isatty(): return False
+    return input(q + " [y/N] ").strip().lower() in ("y", "yes")
+
+
+def backup_dir():
+    d = BACKUPS / (time.strftime("%Y-%m-%d-%H%M%S") + "-repair")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def cmd_apply(args):
+    yes = "--yes" in args
+    want = [a for a in args if not a.startswith("--")]
+    for w in want:
+        if w not in STEPS: die(f"unknown step {w!r}; steps: {', '.join(STEPS)}")
+    if not yes and not sys.stdin.isatty(): die("apply is interactive: run it in a terminal (or pass --yes for the two file edits)")
+    done, bdir = [], None
+    for step, text, fix in problems():
+        if (want and step not in want) or not fix: continue
+        say(f"\n[{step}] {text}")
+        if isinstance(fix, tuple):
+            path, (a, b) = fix
+            say(diff(path, a, b).rstrip())
+            if not (yes or ask("Apply this change?")): say("  skipped"); continue
+            now = read(path)
+            if now != a: say(f"  REFUSED: {path} changed while you were reading. Nothing written; run again."); continue
+            bdir = bdir or backup_dir()
+            shutil.copy2(path, bdir / Path(path).name)
+            tmp = Path(str(path) + ".ito-repair.tmp"); tmp.write_text(b); os.replace(tmp, path)
+            ok = (fix_hypridle() if step == "hypridle" else fix_plugin()) is None
+            if step == "plugin": json.loads(read(path))
+            extra = ""
+            if step == "hypridle": extra = " · hypridle " + restart_hypridle()
+            done.append({"file": str(path), "backup": str(bdir / Path(path).name), "after": sha(b), "step": step})
+            say(f"  applied · backup {bdir / Path(path).name} · re-check {'ok' if ok else 'STILL FAILING'}{extra}")
+        elif step == "paths":
+            say("  KEEP ANOTHER TTY OPEN (Ctrl+Alt+F3) before saying yes. It does not lock the screen.")
+            if fix["wrapper"]: say(f"  rename {fix['wrapper'][0]}  ->  {fix['wrapper'][1].name}")
+            if fix["hypridle"]: say(diff(HYPRIDLE, *fix["hypridle"]).rstrip())
+            if not ask("Apply these changes?"): say("  skipped"); continue
+            bdir = bdir or backup_dir()
+            if fix["hypridle"]:
+                a, b = fix["hypridle"]
+                if read(HYPRIDLE) != a: say(f"  REFUSED: {HYPRIDLE} changed while you were reading. Nothing written; run again."); continue
+                shutil.copy2(HYPRIDLE, bdir / HYPRIDLE.name)
+                tmp = Path(str(HYPRIDLE) + ".ito-repair.tmp"); tmp.write_text(b); os.replace(tmp, HYPRIDLE)
+                done.append({"file": str(HYPRIDLE), "backup": str(bdir / HYPRIDLE.name), "after": sha(b), "step": "hypridle"})
+            if fix["wrapper"]:
+                src, dst = fix["wrapper"]
+                shutil.copy2(src, bdir / src.name)
+                os.replace(src, dst)
+                done.append({"file": str(src), "backup": str(bdir / src.name), "after": "renamed", "step": "wrapper", "to": str(dst)})
+            say("  applied" + (" · hypridle " + restart_hypridle() if fix["hypridle"] else "") + f" · backups in {bdir}")
+        elif step == "owner":
+            if yes or not sys.stdin.isatty(): say("  skipped: changing the lock owner is never done non-interactively. Run `ito-lock own ito-qs` yourself."); continue
+            say("  KEEP ANOTHER TTY OPEN (Ctrl+Alt+F3) before saying yes. It is NOT locked now; undo: `ito-lock own --undo`.")
+            if ask("Run `ito-lock own ito-qs` now (it shows its own diff and asks again)?"):
+                subprocess.run([str(BIN / "ito-lock"), "own", "ito-qs"])
+        elif step == "screensaver":
+            if ask("Use Omarchy's timer only (removes our hypridle block, backed up by ito-screensaver)?"):
+                r = subprocess.run([str(BIN / "ito-screensaver"), "use-omarchy-timer"], capture_output=True, text=True)
+                say("  " + (r.stdout.strip().splitlines() or [r.stderr.strip()])[-1])
+                say("  undo: `ito-screensaver install-idle`")
+        elif step == "boot":
+            say("  Nothing to run here: press 'Apply…' on the Boot tab (or run `ito-plymouth apply`) yourself; it asks for your password.")
+    if done:
+        BACKUPS.mkdir(parents=True, exist_ok=True)
+        LAST.write_text(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "files": done}, indent=1))
+    subprocess.run([str(BIN / "ito-sysart-snapshot"), "invalidate"], capture_output=True) if not OFFLINE else None
+    say("\nRe-check:")
+    left = [s for s, _, f in problems() if f]
+    say("  still open: " + (", ".join(left) if left else "nothing") + ("   (owner/screensaver/boot are yours to decide)" if left else ""))
+
+
+def cmd_undo():
+    last = read(LAST)
+    if not last: die("nothing to undo (no repair-last.json)")
+    rec = json.loads(last)
+    rc, keep = 0, []
+    for f in reversed(rec["files"]):
+        if f["step"] == "wrapper":
+            if Path(f["file"]).exists(): say(f"  REFUSED {f['file']}: a file is back in place already; compare with {f['to']} by hand."); rc = 1; keep.append(f); continue
+            try: os.replace(f["to"], f["file"]); say(f"  restored {f['file']}")
+            except OSError as e: say(f"  {f['to']}: {e}"); rc = 1; keep.append(f)
+            continue
+        cur, bak = read(f["file"]), read(f["backup"])
+        if bak is None: say(f"  {f['file']}: backup missing ({f['backup']}); not touched"); rc = 1; keep.append(f); continue
+        if cur is None or sha(cur) != f["after"]:
+            say(f"  REFUSED {f['file']}: it changed after the repair (by you or an update). Compare with {f['backup']} by hand."); rc = 1; keep.append(f); continue
+        tmp = Path(f["file"] + ".ito-repair.tmp"); tmp.write_text(bak); os.replace(tmp, f["file"])
+        say(f"  restored {f['file']}" + (" · hypridle " + restart_hypridle() if f["step"] == "hypridle" else ""))
+    if not OFFLINE: subprocess.run([str(BIN / "ito-sysart-snapshot"), "invalidate"], capture_output=True)
+    if keep: LAST.write_text(json.dumps({**rec, "files": keep[::-1]}, indent=1))
+    else: LAST.unlink(missing_ok=True)
+    say("Owner and screensaver have their own undo: `ito-lock own --undo`, `ito-screensaver install-idle`.")
+    sys.exit(rc)
+
+
+a = sys.argv[1:]
+if not a or a[0] in ("-h", "--help", "help"): print(__doc__)
+elif a[0] == "plan": cmd_plan()
+elif a[0] == "apply": cmd_apply(a[1:])
+elif a[0] == "undo": cmd_undo()
+else: die("usage: ito-repair plan | apply [--yes] [step...] | undo")

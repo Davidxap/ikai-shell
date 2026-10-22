@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""ito-shells — every desktop shell installed on this machine, and the way to switch to one.
+
+The IKAI shell is one of several a person may have. Which ones exist is not hard-coded: it is read from
+what is installed.
+
+  1. the user's own switcher (~/.local/bin/shell-switch) is asked first. It knows its shells, whether each
+     one really is installed, and how to swap between them cleanly, so it is the source of truth and the way
+     to switch whenever it exists
+  2. shells it does not know are found from evidence: quickshell configs, known bars on PATH
+  3. with no switcher at all, a plain fallback stops the running shell and starts the other
+
+    ito-shells               print JSON: {"shells": [...], "switcher": bool, "current": name}
+    ito-shells --switch NAME switch to one, fully detached from whoever asked (the panel that asks is itself
+                             part of the shell that is about to be closed)
+"""
+
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+OMARCHY = HOME / ".config" / "omarchy"
+SWITCHER = HOME / ".local" / "bin" / "shell-switch"
+CHOICE = HOME / ".config" / "hypr" / "shell-choice"
+
+# name -> (label, proof it is installed, plain start command)
+KNOWN = {
+    "omarchy": ("Omarchy", lambda: Path("/usr/share/omarchy/shell/shell.qml").exists(), ["omarchy-launch-shell"]),
+    "caelestia": ("Caelestia", lambda: (HOME / ".config/quickshell/caelestia").is_dir() or bool(shutil.which("caelestia")),
+                  ["quickshell", "-c", "caelestia"]),
+    "hyprpanel": ("HyprPanel", lambda: bool(shutil.which("hyprpanel")), ["hyprpanel"]),
+    "ags": ("AGS", lambda: bool(shutil.which("ags")), ["ags", "run"]),
+    "waybar": ("Waybar", lambda: bool(shutil.which("waybar")), ["waybar"]),
+    "noctalia": ("Noctalia", lambda: (HOME / ".config/quickshell/noctalia-shell").is_dir(),
+                 ["quickshell", "-c", "noctalia-shell"]),
+    "dms": ("DankMaterialShell", lambda: (HOME / ".config/quickshell/dms").is_dir(), ["quickshell", "-c", "dms"]),
+}
+ITO = {"ito", "itobar"}
+BARS = ["waybar", "hyprpanel", "eww", "nwg-panel", "yambar", "polybar", "ironbar", "sfwbar", "ags"]
+
+
+def run_json(cmd):
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=20).stdout
+        return json.loads(out)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def variants():
+    out = {}
+    for path in sorted(OMARCHY.glob("shell.*.json")):
+        name = path.name[len("shell."):-len(".json")]
+        if name in ("json", "stock"):
+            continue
+        try:
+            out[name] = str(json.loads(path.read_text()).get("bar", {}).get("id") or "")
+        except (OSError, ValueError):
+            out[name] = ""
+    return out
+
+
+def live_bar():
+    try:
+        return str(json.loads((OMARCHY / "shell.json").read_text()).get("bar", {}).get("id") or "")
+    except (OSError, ValueError):
+        return ""
+
+
+def chosen():
+    try:
+        return CHOICE.read_text().strip()
+    except OSError:
+        return ""
+
+
+def listing():
+    vs = variants()
+    known = run_json([str(SWITCHER), "json"]) if SWITCHER.exists() else None
+    out, seen = [], set()
+    current = (known or {}).get("current") or chosen()
+    for s in (known or {}).get("shells", []):
+        if not s.get("installed"):
+            continue
+        sid = s["id"]
+        seen.add(sid)
+        bar_id = vs.get(sid, "")
+        is_ito = sid in ITO or bar_id == "ito.bar"
+        out.append({"id": sid, "name": "IKAI" if is_ito else s.get("desc") or sid.capitalize(),
+                    "ours": is_ito, "variant": sid in vs, "barId": bar_id, "switcher": True,
+                    "active": sid == current, "chosen": sid == current})
+    # what the switcher does not know about
+    for sid, (label, installed, _) in KNOWN.items():
+        if sid in seen or sid in ITO or not installed():
+            continue
+        if sid == "waybar" and known is not None:              # the switcher runs Waybar through its profiles
+            continue
+        out.append({"id": sid, "name": label, "ours": False, "variant": False, "barId": "", "switcher": False,
+                    "active": False, "chosen": False})
+    if any(o["id"] == "ito" for o in out):
+        out = [o for o in out if o["id"] != "itobar"]
+    return {"shells": out, "switcher": known is not None, "current": current, "liveBar": live_bar()}
+
+
+def detach(cmd):
+    """Start something that outlives us and holds none of our pipes."""
+    subprocess.Popen(cmd, start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, close_fds=True)
+
+
+def stop_everything():
+    """Fallback stop: the launcher loop first (or it brings the shell straight back), then the shells, by
+    exact process name."""
+    subprocess.run(["pkill", "-TERM", "-f", r"^(/usr)?/bin/(ba)?sh( -[a-z]+)* [^ ]*/omarchy-launch-shell( |$)"],
+                   check=False)
+    for name in ["quickshell"] + BARS:
+        subprocess.run(["pkill", "-TERM", "-x", name], check=False)
+
+
+def switch(name):
+    data = listing()
+    ids = {s["id"]: s for s in data["shells"]}
+    if name not in ids:
+        print(f"unknown shell: {name}", file=sys.stderr)
+        return 1
+    if ids[name]["switcher"]:
+        detach([str(SWITCHER), name])
+        return 0
+    # no switcher knows it: plain stop and start
+    stop_everything()
+    import time
+    time.sleep(1.2)
+    cmd = KNOWN[name][2] if name in KNOWN else [name]
+    detach(["setsid"] + cmd)
+    return 0
+
+
+def main() -> int:
+    if "--switch" in sys.argv:
+        return switch(sys.argv[sys.argv.index("--switch") + 1])
+    json.dump(listing(), sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

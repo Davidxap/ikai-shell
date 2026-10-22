@@ -1,0 +1,323 @@
+{
+ "version": 1,
+ "bar": {
+  "centerAnchor": "ito.tomie",
+  "id": "ito.bar",
+  "layout": {
+   "left": [
+    {
+     "id": "ito.spiral",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.workspaces",
+     "shibumiModule": true
+    }
+   ],
+   "center": [
+    {
+     "id": "ito.clock",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.tomie",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.date",
+     "shibumiModule": true
+    },
+    {
+     "id": "omarchy.menu"
+    }
+   ],
+   "right": [
+    {
+     "id": "ito.weather",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.tray",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.network",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.bluetooth",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.audio",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.display",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.power",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.ai",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.cpu",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.mem",
+     "shibumiModule": true
+    },
+    {
+     "id": "ito.disk",
+     "shibumiModule": true
+    }
+   ]
+  },
+  "position": "top",
+  "style": "itoverse",
+  "transparent": true
+ },
+ "plugins": [
+  {
+   "id": "ito.state",
+   "itoStateSchemaVersion": 1,
+   "ito": {
+    "version": 1,
+    "order": {
+     "left": [
+      "G1",
+      "G2",
+      "G3",
+      "G4",
+      "G5",
+      "G6",
+      "G7",
+      "G:ito.spiral",
+      "G:ito.workspaces"
+     ],
+     "center": [
+      "G8",
+      "G:ito.clock",
+      "G:ito.tomie",
+      "G:ito.date"
+     ],
+     "right": [
+      "G9",
+      "G10",
+      "G11",
+      "G14",
+      "G12",
+      "G13",
+      "G15",
+      "G:ito.weather",
+      "G:ito.tray",
+      "G:ito.network",
+      "G:ito.bluetooth",
+      "G:ito.audio",
+      "G:ito.display",
+      "G:ito.power",
+      "G:ito.ai",
+      "G:ito.cpu",
+      "G:ito.mem",
+      "G:ito.disk"
+     ]
+    },
+    "v1SlotRoles": {
+     "left": [
+      "base",
+      "base",
+      "base",
+      "base",
+      "base",
+      "base",
+      "base",
+      "extra",
+      "extra"
+     ],
+     "center": [
+      "base",
+      "extra",
+      "extra",
+      "extra"
+     ],
+     "right": [
+      "base",
+      "base",
+      "base",
+      "base",
+      "base",
+      "base",
+      "base",
+      "extra",
+      "extra",
+      "extra",
+      "extra",
+      "extra",
+      "extra",
+      "extra",
+      "extra",
+      "extra",
+      "extra",
+      "extra"
+     ]
+    },
+    "splits": {
+     "left": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+     ],
+     "boundaries": [
+      false,
+      false
+     ],
+     "right": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+     ]
+    },
+    "v2Layout": {
+     "left": [
+      "G1",
+      "G2",
+      "G3",
+      "G5",
+      "G6",
+      "G4",
+      "G7",
+      "G:ito.spiral",
+      "G:ito.workspaces",
+      ""
+     ],
+     "center": [
+      "G8",
+      "G:ito.clock",
+      "G:ito.tomie",
+      "G:ito.date"
+     ],
+     "right": [
+      "G9",
+      "G10",
+      "G11",
+      "G14",
+      "G12",
+      "G13",
+      "G16",
+      "G18",
+      "G17",
+      "G15",
+      "G:ito.weather",
+      "G:ito.tray",
+      "G:ito.network",
+      "G:ito.bluetooth",
+      "G:ito.audio",
+      "G:ito.display",
+      "G:ito.power",
+      "G:ito.ai",
+      "G:ito.cpu",
+      "G:ito.mem",
+      "G:ito.disk"
+     ]
+    },
+    "v2Boundaries": [
+     false,
+     false
+    ],
+    "widgets": {
+     "G:ito.spiral": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.workspaces": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.clock": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.tomie": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.date": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.weather": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.tray": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.network": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.bluetooth": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.audio": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.display": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.power": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.ai": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.cpu": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.mem": {
+      "enabledV1": true,
+      "enabledV2": true
+     },
+     "G:ito.disk": {
+      "enabledV1": true,
+      "enabledV2": true
+     }
+    },
+    "presentation": {
+     "shellStyle": "shibumi"
+    }
+   }
+  }
+ ]
+}

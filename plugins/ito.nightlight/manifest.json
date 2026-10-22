@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.nightlight",
+  "name": "Ito Night Light",
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "davidxap",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Night light as one icon of its own (the moon or the fog): click to warm the screen.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Night Light",
+    "description": "Night light as one icon of its own (the moon or the fog): click to warm the screen.",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

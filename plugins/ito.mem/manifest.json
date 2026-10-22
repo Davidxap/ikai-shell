@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.mem",
+  "name": "Ito Memory",
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "davidxap",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Memory in use; the glyph heats with use.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Memory",
+    "description": "Memory in use; the glyph heats with use.",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

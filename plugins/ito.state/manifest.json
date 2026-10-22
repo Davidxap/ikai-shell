@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.state",
+  "name": "Ito State",
+  "version": "0.1.1-beta.14.1-ito.1",
+  "author": "HANCORE (fork by davidxap)",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "license": "MIT",
+  "description": "Normalized Ito configuration and theme palette state.",
+  "kinds": [
+    "service"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml"
+  },
+  "x-shibumi": {
+    "suiteId": "ito.verse",
+    "bundle": "core",
+    "role": "state",
+    "requires": [],
+    "recommends": []
+  }
+}

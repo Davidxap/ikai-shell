@@ -1,0 +1,910 @@
+#!/usr/bin/env python3
+"""ito-health — what is wrong with the shell, why, and how to put it right.
+
+    ito-health              JSON: a list of checks (the control centre's Health page reads this)
+    ito-health --text       the same as a plain report, to paste to someone
+    ito-health --report     a full report written for an AI assistant: the findings, the machine, the bar's state, the
+                            log and how to fix each thing. Paste it into any assistant and it can act on it
+    ito-health --report --save   the same, written to ~/ito-health-report.md
+    ito-health --fix ID     run the safe fix for one check, print JSON {"ok": bool, "message": "..."}
+    ito-health --fix all    run every fix that is offered
+    ito-health --table      the known problems as Markdown (docs/TROUBLESHOOTING.md is made from it)
+
+Each check is {id, name, status: ok|warn|fail, detail, why, fix, fixId, items}.
+  detail  what was found, in a sentence
+  why     what it means for the user (only when something is wrong)
+  fix     what to do, in words (only when something is wrong)
+  fixId   when set, `ito-health --fix <fixId>` does it, and the panel shows a Fix button
+  items   for the error log: each distinct error once, with where it comes from, how often, why and what to do
+
+Nothing changes unless --fix is asked for.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path.home()
+MODULES = Path(__file__).resolve().parent.parent
+BIN = Path(__file__).resolve().parent
+OMARCHY = HOME / ".config" / "omarchy"
+
+
+def shutil_which(name: str):
+    import shutil
+    return shutil.which(name)
+
+
+def sh(cmd, timeout=8) -> str:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def repo_root():
+    for cand in (os.environ.get("ITO_REPO"),
+                 (HOME / ".config/ito/repo").read_text().strip() if (HOME / ".config/ito/repo").exists() else None,
+                 str(Path(__file__).resolve().parents[3])):   # a run from the repo checkout itself (install.sh marks a checkout)
+        if cand and (Path(cand) / "plugins").is_dir() and (Path(cand) / "install.sh").is_file():
+            return Path(cand)
+    return None
+
+
+# ----------------------------------------------------------------------------------------- known problems
+# Each: a pattern on the log message, and what it means. `where` says whose it is: "ours" counts against the
+# shell's health, "other" is another plugin's (shown, not counted), "noise" is harmless and hidden.
+KNOWN = [
+    {"id": "duplicate-property", "re": r"Duplicate property name|Duplicate binding|Duplicated property",
+     "title": "A panel page declares the same thing twice", "where": "ours",
+     "why": "One of the Control Centre's pages has a property or a binding written twice, so that page fails to load and shows empty.",
+     "fix": "Copy the files back with the deploy step: the repository's version is the corrected one. If it comes back, send the report.",
+     "fixId": "deploy"},
+    {"id": "assign-type", "re": r"Cannot assign object of type|Cannot assign binding of type",
+     "title": "A widget or page uses a part in the wrong place", "where": "ours",
+     "why": "Something was put where the shell does not accept it, so that widget or page does not load (a blank spot or an empty page).",
+     "fix": "Copy the files back with the deploy step. If it comes back, send the report.",
+     "fixId": "deploy"},
+    {"id": "animated-image", "re": r"Error Reading Animated Image File",
+     "title": "Your own media effect file cannot be read", "where": "ours",
+     "why": "The picture or GIF chosen as the media effect is missing or is not a picture the shell can play.",
+     "fix": "Fix goes back to the Blood effect if the file is gone; choose another file on the Effects page.",
+     "fixId": "pictures"},
+    {"id": "own-picture", "re": r"Cannot open: file://\S*/\.(cache|config)/ito/(marks|effects)/\S*",
+     "title": "One of your own pictures is missing", "where": "ours",
+     "why": "A picture you chose (a mark, the seal's picture, a workspace picture or the media effect) is no longer where the shell looks for it, so that spot is blank. Its adapted copy lives in ~/.cache/ito/marks and is rebuilt from your original in ~/.config/ito/marks.",
+     "fix": "Fix rebuilds the adapted copies from your originals, and if a style or effect that depends on a picture that is gone, goes back to the default one.",
+     "fixId": "pictures"},
+    {"id": "missing-file", "re": r"Cannot open: file://\S*",
+     "title": "A picture file is missing", "where": "ours",
+     "why": "The shell tried to draw an image that is not on disk (or was given a folder instead of a picture), so that spot is blank.",
+     "fix": "Copy the art back with the deploy step. If it is one of your own marks, check the file in ~/.config/ito/marks.",
+     "fixId": "deploy"},
+    {"id": "widget-failed", "re": r"Plugin widget (\S+) failed",
+     "title": "A widget failed to load", "where": "ours",
+     "why": "The named widget could not start, so it is missing from the bar until it is fixed.",
+     "fix": "Restore its folder from the repository and restart the shell.",
+     "fixId": "plugins"},
+    {"id": "type-unavailable", "re": r"Type (\S+) unavailable|is not a type",
+     "title": "A QML component could not be built", "where": "ours",
+     "why": "A file the shell needs failed to load, usually because of an error in it or in a file it imports. Everything that uses it is missing.",
+     "fix": "Restart the shell. If it comes back, look for the error just before it in this list.",
+     "fixId": "restart"},
+    {"id": "set-twice", "re": r"Property value set multiple times",
+     "title": "A property is assigned twice in one file", "where": "ours",
+     "why": "Two lines in the same QML object set the same thing. The object fails to load, so the widget or the whole bar disappears.",
+     "fix": "This is a bug in the file named. Send the report; it is a one-line change.",
+     "fixId": ""},
+    {"id": "no-property", "re": r"Cannot assign to non-existent property",
+     "title": "A file sets a property that does not exist", "where": "ours",
+     "why": "A name is misspelt or belongs to another QML version. The object fails to load.",
+     "fix": "This is a bug in the file named. Send the report.",
+     "fixId": ""},
+    {"id": "null-read", "re": r"Cannot read property '(\w+)' of null",
+     "title": "Something was used before it existed", "where": "ours",
+     "why": "A tooltip or panel ran before the bar it belongs to was ready. It happens for a moment while the shell starts or reloads and clears itself.",
+     "fix": "Nothing to do if it stops after start-up. If it keeps coming, restart the shell.",
+     "fixId": "restart"},
+    {"id": "undefined-assign", "re": r"Unable to assign \[undefined\] to",
+     "title": "A value was not ready yet", "where": "ours",
+     "why": "A control read a setting before it had loaded, and used its default for that moment.",
+     "fix": "Harmless once the panel is open. Nothing to do.",
+     "fixId": ""},
+    {"id": "type-error", "re": r"TypeError|ReferenceError|is not a function",
+     "title": "A script raised an error", "where": "ours",
+     "why": "A widget's code did something that is not allowed, so part of it stops working.",
+     "fix": "Restart the shell. If it returns, send the report with the file named.",
+     "fixId": "restart"},
+    {"id": "retired", "re": r"suite marker|retire",
+     "title": "The bar engine refused to start", "where": "ours",
+     "why": "The engine checks that its files match a signature. After files change the signature is stale and it retires for good until it is rewritten.",
+     "fix": "Rewrite the signature and restart.",
+     "fixId": "markers"},
+    {"id": "mpris", "re": r"quickshell\.dbus\.properties|org\.mpris|ServiceUnknown",
+     "title": "A media player closed while it was being read", "where": "noise",
+     "why": "Browsers and players come and go; the media controls read one that has just quit. Harmless.", "fix": "", "fixId": ""},
+    {"id": "ipc-twice", "re": r"Handler was registered but will not be used because another handler",
+     "title": "Two handlers for one remote command", "where": "noise",
+     "why": "The same command name was registered twice, usually right after a plugin reloaded. The second is ignored. The 'One bar' check tells whether it left a second bar.",
+     "fix": "", "fixId": ""},
+    {"id": "notif-icon", "re": r"Could not load icon",
+     "title": "A notification's picture could not be shown", "where": "noise",
+     "why": "A notification (a screenshot, for example) pointed at an image that was already gone or still being written. The notification itself is shown.", "fix": "", "fixId": ""},
+    {"id": "ctx", "re": r"attempted to evaluate a function in an invalid context",
+     "title": "A widget was replaced while it was working", "where": "noise",
+     "why": "Happens whenever a plugin reloads. It changes nothing.", "fix": "", "fixId": ""},
+    {"id": "portal", "re": r"portal|Could not register app ID", "title": "Desktop portal", "where": "noise",
+     "why": "The desktop portal does not accept a second app id. Harmless.", "fix": "", "fixId": ""},
+    {"id": "bluez", "re": r"org\.bluez|DBusObjectManager", "title": "Bluetooth service", "where": "noise",
+     "why": "Bluetooth is not running or has no adapter. Harmless.", "fix": "", "fixId": ""},
+    {"id": "gpu-driver", "re": r"is not a conformant Vulkan implementation|Mesa: User error", "title": "Graphics driver notice", "where": "noise",
+     "why": "A one-time disclaimer the graphics driver itself prints at startup (RADV's Vulkan-conformance notice, a Mesa warning). Nothing to do with the shell.", "fix": "", "fixId": ""},
+    {"id": "ffmpeg-demux", "re": r"qt\.multimedia\.ffmpeg|moov atom not found", "title": "A media file could not be decoded", "where": "other",
+     "why": "Something in the host shell (not an IKAI widget: none of ours use QtMultimedia) tried to open a video or audio file that is not a valid container. No IKAI file appears in this log line.", "fix": "", "fixId": ""},
+    {"id": "dbusmenu", "re": r"quickshell\.dbus\.dbusmenu|No such object path '/MenuBar'", "title": "A tray application's menu went away", "where": "noise",
+     "why": "A background application (the one in the tray) closed or restarted while the shell was asking it for its menu. It is that application's menu, not an IKAI file, and it clears by itself.", "fix": "", "fixId": ""},
+    {"id": "qt-atob", "re": r"Qt\.atob\(string\)", "title": "A deprecated Qt call in Omarchy's own shell", "where": "noise",
+     "why": "Omarchy's shell (Commons/Util.qml, shell.qml) uses an older Qt call that newer Qt versions warn about. It is not an IKAI file and changes nothing on screen.", "fix": "", "fixId": ""},
+    {"id": "omarchy-pragma", "re": r"Unrecognized pragma \"?OmarchyLoadPatch", "title": "Omarchy's own shell file uses a marker Quickshell does not know", "where": "noise",
+     "why": "The first line of Omarchy's shell.qml (/usr/share/omarchy/shell/shell.qml) is a '//@ pragma OmarchyLoadPatch' marker that Omarchy reads itself; Quickshell does not know it and says so once on every start. It is not an IKAI file and changes nothing on screen.", "fix": "", "fixId": ""},
+    {"id": "font-size", "re": r"Both point size and pixel size set", "title": "A font resolved two sizes at once", "where": "noise",
+     "why": "Qt's own font resolution, not a line in any IKAI or Omarchy-shell file (neither tree has 'pointSize' in it) — it fires once on every startup, of any shell, and Qt already resolves it (pixel size wins). Nothing to fix.", "fix": "", "fixId": ""},
+]
+
+OURS_PATH = re.compile(r"/(plugins/ito\.|bar/modules/)")
+
+
+def classify(message: str, path: str):
+    for entry in KNOWN:
+        if re.search(entry["re"], message):
+            where = entry["where"]
+            if where == "ours" and path and not OURS_PATH.search(path):
+                where = "other"
+            return entry, where
+    return None, ("ours" if (not path or OURS_PATH.search(path)) else "other")
+
+
+def parse_log(lines):
+    """Distinct errors from the live shell's log: one entry per (file, message), with how often it came."""
+    rx = re.compile(r"omarchy-shell\[(\d+)\]:\s+(?:WARN|ERROR)\S*\s+(.*)")
+    loc = re.compile(r"file://(\S+?\.qml)(?:\[(\d+):[-\d]+\])?:\s*(.*)")
+    groups = {}
+    for line in lines:
+        m = rx.search(line)
+        if not m:
+            continue
+        body = m.group(2)
+        path, at, msg = "", "", body
+        lm = loc.search(body)
+        if lm:
+            path, at, msg = lm.group(1), lm.group(2) or "", lm.group(3)
+        msg = re.sub(r"\s+", " ", msg).strip()
+        key = (path, msg[:160])
+        g = groups.setdefault(key, {"path": path, "line": at, "message": msg, "count": 0})
+        g["count"] += 1
+    out = []
+    for g in groups.values():
+        entry, where = classify(g["message"], g["path"])
+        item = {
+            "message": g["message"], "count": g["count"], "where": where,
+            "file": (re.sub(r"^.*/(plugins|bar/modules)/", r"\1/", g["path"]) + (f":{g['line']}" if g["line"] else "")) if g["path"] else "",
+            "title": entry["title"] if entry else "An error the shell has no note for",
+            "why": entry["why"] if entry else "The shell logged this and there is no explanation for it yet.",
+            "fix": entry["fix"] if entry else "Send the report so it can be looked at.",
+            "fixId": entry["fixId"] if entry else "",
+            "known": bool(entry),
+        }
+        out.append(item)
+    out.sort(key=lambda i: (i["where"] != "ours", -i["count"]))
+    return out
+
+
+# --------------------------------------------------------------------------------------------------- checks
+def check(cid, name, ok, good, bad, why="", fix="", fixId="", level="fail", items=None):
+    c = {"id": cid, "name": name, "status": "ok" if ok else level, "detail": good if ok else bad,
+         "why": "" if ok else why, "fix": "" if ok else fix, "fixId": "" if ok else fixId}
+    if items:
+        c["items"] = items
+    return c
+
+
+def live_pid():
+    p = sh(["pgrep", "-x", "quickshell"]).split()
+    return p[0] if p else ""
+
+
+def restart_status():
+    try:
+        return json.loads(sh([str(BIN / "ito-restart"), "status"]) or "{}")
+    except ValueError:
+        return {}
+
+
+def bar_windows():
+    try:
+        data = json.loads(sh(["hyprctl", "layers", "-j"]) or "{}")
+    except ValueError:
+        return {}
+    out = {}
+    for mon, levels in data.items():
+        n = sum(1 for lv in levels.get("levels", {}).values() for i in lv if i.get("namespace") == "ito-bar")
+        if n:
+            out[mon] = n
+    return out
+
+
+def all_checks():
+    out = []
+    try:
+        cfg = json.loads((OMARCHY / "shell.json").read_text())
+    except (OSError, ValueError):
+        cfg = {}
+    entry = next((p for p in cfg.get("plugins", []) if isinstance(p, dict) and p.get("id") == "ito.state"), {})
+
+    out.append(check("state", "State service", entry.get("itoStateSchemaVersion") == 1 and isinstance(entry.get("ito"), dict),
+                     "Ready: bar shape, island cuts and dragging widgets are saved.",
+                     "Not initialised.",
+                     why="Changes to the bar's shape and layout are silently refused because the state has no IKAI block.",
+                     fix="Apply the default design once; it writes the block.", fixId="state"))
+
+    try:
+        json.loads((MODULES / "ito-style.json").read_text())
+        out.append(check("settings", "Settings", True, "The settings file reads cleanly.", ""))
+    except (OSError, ValueError):
+        out.append(check("settings", "Settings", False, "", "ito-style.json is missing or damaged.",
+                         why="Every look and colour setting falls back to its default.",
+                         fix="Reset look rewrites it.", fixId="settings"))
+
+    fonts = sh(["fc-list", ":", "family"])
+    out.append(check("fonts", "Fonts", "Noto Serif CJK" in fonts and "Noto Serif" in fonts,
+                     "Noto Serif and Noto Serif CJK are installed.", "Noto Serif or Noto Serif CJK is missing.",
+                     why="The numbers, the clock and the kanji seal fall back to another face and look wrong.",
+                     fix="Install the noto-fonts and noto-fonts-cjk packages with your package manager."))
+
+    out.append(check("icons", "Icon theme", (HOME / ".local/share/icons/Ito-verse-icons/index.theme").exists(),
+                     "The IKAI icon theme is installed for Nautilus and other GTK apps.", "The IKAI icon theme is not installed.",
+                     why="File managers and GTK apps keep their own icons; the themed set is unused.",
+                     fix="Run scripts/gen-icons.py --install from the repository.", level="warn"))
+    out.append(check("cursor", "Cursor theme", (HOME / ".local/share/icons/Ito-verse/cursors").exists(),
+                     "The IKAI cursor theme is installed.", "The IKAI cursor theme is not installed.",
+                     why="The pointer stays the system's.", fix="Run scripts/gen-cursors.py --install.", level="warn"))
+
+    colors = HOME / ".local/state/omarchy/current/theme/colors.toml"
+    out.append(check("colours", "Theme colours", colors.exists(),
+                     "The installed theme's colours can be read, so Follow theme works.", "No theme colours found.",
+                     why="Follow theme falls back to the shell's own palette.",
+                     fix="Pick a theme in Omarchy (its colors.toml is what is read).", level="warn"))
+    out.append(check("shader", "Shader", (MODULES / "shaders/ito-theme.frag.qsb").exists(),
+                     "The theme shader is built.", "The theme shader is missing.",
+                     why="Art will not follow the theme's colours.",
+                     fix="Copy the files back with the deploy step.", fixId="deploy", level="warn"))
+
+    layout = cfg.get("bar", {}).get("layout", {})
+    ids = [e if isinstance(e, str) else e.get("id", "") for side in ("left", "center", "right") for e in layout.get(side, [])]
+    known = set()
+    for base in (OMARCHY / "plugins", HOME / ".config/ito/plugins"):
+        if base.is_dir():
+            known |= {p.name for p in base.iterdir()}
+    missing = [i for i in ids if i and i not in known and not i.startswith("omarchy.")]
+    out.append(check("plugins", "Widgets", not missing, f"All {len(ids)} widgets on the bar are installed.",
+                     "Not installed: " + ", ".join(missing),
+                     why="Those widgets cannot be shown, and the engine drops them from the layout for good.",
+                     fix="Restore their folders from the repository.", fixId="plugins"))
+
+    off = [g[2:] for g, v in entry.get("ito", {}).get("widgets", {}).items()
+           if g.startswith(("G:ito.",)) and (v.get("enabledV1") is False or v.get("enabledV2") is False)]
+    out.append(check("seal", "Seal", "ito.tomie" not in off,
+                     "The seal is on the bar, so this panel can always be reached.",
+                     "The seal is switched off.",
+                     why="This panel cannot be reached from the bar.", fix="Switch it back on.", fixId="seal"))
+    if off:
+        out.append({"id": "off", "name": "Switched off", "status": "ok",
+                    "detail": ", ".join(off) + " (Icons page: arrow to bring back)", "why": "", "fix": "", "fixId": ""})
+
+    # ---- the shell itself: how many, and how many bars
+    st = restart_status()
+    shells, loops, headless = st.get("shells", 0), st.get("launchers", 0), st.get("headless", [])
+    out.append(check("runtime", "Runtime", shells >= 1, "The shell is running.", "The shell is not running.",
+                     why="There is no bar.", fix="Start it.", fixId="restart"))
+    windows = bar_windows()
+    dup = {m: n for m, n in windows.items() if n > 1}
+    what = ([f"{shells} shells"] if shells > 1 else []) + ([f"{loops} launchers"] if loops > 1 else []) \
+        + [f"{n} bars on {m}" for m, n in dup.items()]
+    out.append(check("copies", "One bar", shells <= 1 and loops <= 1 and not dup,
+                     "One shell, one launcher, one bar per screen.", "More than one: " + ", ".join(what) + ".",
+                     why="Two bars stack on the same edge; the second pushes the first down and windows lose the space of both. "
+                         "It happens when the shell reloads a plugin while it is running, or when a restart is cut short.",
+                     fix="Restart once cleanly; the extra copies are removed.", fixId="onebar"))
+    other = json.loads(sh([str(BIN / "ito-onebar"), "--check"]) or "{}").get("other", [])
+    other = [o for o in other if "copies" not in o and "launcher" not in o and "bar windows" not in o]
+    out.append(check("otherbar", "Other bars", not other, "No other bar program is running.",
+                     "Running beside this one: " + ", ".join(other) + ".",
+                     why="A status bar from another shell was left running and stacks with this one.",
+                     fix="Stop it.", fixId="onebar"))
+    out.append(check("headless", "Virtual screens", not headless, "No virtual screens.",
+                     "Virtual screen(s) left over: " + ", ".join(headless) + ".",
+                     why="Windows and workspaces can end up on a screen you cannot see, so what you were looking at seems to vanish "
+                         "and workspaces look duplicated.",
+                     fix="Remove them; their windows come back to your screen.", fixId="headless"))
+
+    # ---- markers (only where the repository is at hand to compute them)
+    root = repo_root()
+    if root and (root / "scripts/gen-itobar-marker.py").exists():
+        ok = subprocess.run([sys.executable, str(root / "scripts/gen-itobar-marker.py"), "--check"],
+                            capture_output=True).returncode == 0
+        out.append(check("markers", "Engine signature", ok, "The bar engine's signature matches its files.",
+                         "The signature is stale.",
+                         why="The engine will refuse to start (no bar) the next time the shell restarts.",
+                         fix="Rewrite the signature and restart.", fixId="markers"))
+
+    # ---- is this the bar that is running, and do the pieces it needs exist
+    bar_id = cfg.get("bar", {}).get("id", "")
+    out.append(check("active", "Active bar", bar_id == "ito.bar",
+                     "IKAI is the bar this shell is set to use.",
+                     f"The shell is set to use '{bar_id or 'no bar'}', not IKAI.",
+                     why="The IKAI widgets and this panel are not on screen. Another shell's bar is.",
+                     fix="Fix switches back to IKAI (the same as the Switch button on the Setup page). It happens when the engine retires the bar after files changed while it ran; deploy now stops the shell first.",
+                     fixId="switch", level="warn"))
+
+    art = MODULES / "ito-art"
+    refs = set()
+    for js in ("ItoMarks.js", "ItoIcons.js"):
+        try:
+            text = (MODULES / js).read_text()
+        except OSError:
+            continue
+        refs |= set(re.findall(r'"((?:[\w-]+/)+[\w.-]+\.png)"', text))
+    lost = sorted(r for r in refs if not any((art / d / r).exists() or (art / r).exists() for d in ("", "system", "decor")))
+    out.append(check("art", "Art files", not lost, f"All {len(refs)} pictures the shell names are on disk.",
+                     f"{len(lost)} picture(s) missing, for example {', '.join(lost[:3])}.",
+                     why="Those spots on the bar and in the panel are blank.",
+                     fix="Copy the art back with the deploy step.", fixId="deploy"))
+
+    def norm(p: Path) -> bool:
+        return p.exists()
+    cache = HOME / ".cache" / "ito" / "marks"
+    try:
+        style = json.loads((MODULES / "ito-style.json").read_text())
+    except (OSError, ValueError):
+        style = {}
+    gone = []
+    if style.get("style") == "custom" and not norm(cache / "_ws-active.png"):
+        gone.append("the Custom workspace style has no picture")
+    if style.get("mediaFx") == "custom" and not norm(HOME / ".config/ito/effects/custom"):
+        gone.append("the media effect 'Your own' has no file")
+    if style.get("seal") == "custom" and not norm(cache / "_seal.png"):
+        gone.append("the seal is set to your picture but there is none")
+    if style.get("sealDeco") == "custom" and not norm(cache / "_deco.png"):
+        gone.append("the decoration is set to your picture but there is none")
+    mark = str(style.get("menuMark", ""))
+    if mark.startswith("custom:") and not norm(cache / (mark[7:] + ".png")):
+        gone.append("the menu mark is your picture but it cannot be found")
+    try:
+        empties = sorted(f.name for f in cache.glob("*.png") if f.stat().st_size == 0)
+    except OSError:
+        empties = []
+    if empties:                                    # a copy cut short while it was written; the bar cannot decode it
+        gone.append("an adapted picture is empty (" + ", ".join(empties) + ")")
+    out.append(check("pictures", "Your pictures", not gone, "Everything you chose of your own is in place.",
+                     "; ".join(gone).capitalize() + ".",
+                     why="Something you selected points at a picture that is not there, so it shows blank or nothing.",
+                     fix="Fix rebuilds them from your originals and puts back the default for any that are gone.", fixId="pictures"))
+
+    # ---- sliders left somewhere they should not be
+    RANGES = {"light": (0, 2.5), "vibrance": (0.3, 2), "fxSpeed": (0.2, 3), "fxStrength": (0.2, 2.5),
+              "iconScale": (0.4, 1.0), "wsArtScale": (0.2, 1.2), "markScale": (0.2, 1.2), "surfaceOpacity": (0.05, 1), "popupSeconds": (0, 60)}
+    odd = []
+    for k, (lo, hi) in RANGES.items():
+        v = style.get(k)
+        if v is None:
+            continue
+        try:
+            f = float(v)
+            if not (lo <= f <= hi):
+                odd.append(f"{k}={v}")
+        except (TypeError, ValueError):
+            odd.append(f"{k}={v!r}")
+    out.append(check("ranges", "Look sliders", not odd, "Every slider is inside its range.",
+                     "Outside their range or not numbers: " + ", ".join(odd) + ".",
+                     why="A value like that can blank colours or glows. The shell clamps most of them, but the panel and the bar can then disagree.",
+                     fix="Fix puts those sliders back to their defaults; the rest of your look is kept.", fixId="lookreset"))
+
+    # ---- a moving wallpaper behind a see-through bar
+    live = False
+    try:
+        bgdir = HOME / ".local/state/omarchy/current/theme/backgrounds"
+        # only when the theme in use really ships a video: having the wallpaper plugin installed is not enough
+        if bgdir.is_dir() and any(f.suffix.lower() in (".mp4", ".webm", ".mkv", ".gif") for f in bgdir.iterdir()):
+            live = True
+    except (OSError, ValueError):
+        pass
+    try:
+        see_through = bool(style.get("fxGlass")) or float(style.get("surfaceOpacity", 1)) < 0.98
+    except (TypeError, ValueError):
+        see_through = False
+    out.append(check("livewall", "Moving wallpaper", not (live and see_through),
+                     "The plate is solid, or the wallpaper does not move.",
+                     "The wallpaper moves and the bar's plate is see-through (glass or opacity below 100%).",
+                     why="The wallpaper's motion shows through the plate and reads as the bar flickering or shimmering. It also keeps the "
+                         "GPU busy behind the bar all day.",
+                     fix="Fix makes the plate solid (opacity 100%, glass off). Everything else in your look stays.", fixId="solidplate",
+                     level="warn"))
+
+    # ---- the programs the panel calls on
+    import importlib.util
+    missing_tools = []
+    if not any(shutil_which(t) for t in ("zenity", "kdialog", "yad")):
+        missing_tools.append("a file dialog (zenity) to choose your own pictures")
+    if not shutil_which("wl-copy"):
+        missing_tools.append("wl-clipboard to copy the report")
+    if importlib.util.find_spec("PIL") is None or importlib.util.find_spec("numpy") is None:
+        missing_tools.append("Python Pillow and NumPy to adapt your pictures")
+    for tool, why in (("rsync", "rsync to install and update"), ("jq", "jq to switch shells")):
+        if not shutil_which(tool):
+            missing_tools.append(why)
+    out.append(check("tools", "Helper programs", not missing_tools, "The programs the panel calls on are installed.",
+                     "Missing: " + "; ".join(missing_tools) + ".",
+                     why="The buttons that need them do nothing.",
+                     fix="Install zenity, wl-clipboard, python-pillow, python-numpy, rsync and jq with your package manager.", level="warn"))
+
+    exe = [f.name for f in BIN.iterdir() if f.is_file() and not os.access(f, os.X_OK)]
+    out.append(check("perms", "Tools are executable", not exe, "Every IKAI tool can be run.",
+                     "Not executable: " + ", ".join(exe) + ".",
+                     why="The panel runs these tools; without permission the buttons do nothing.",
+                     fix="Copy the files back with the deploy step.", fixId="deploy"))
+
+    # ---- the pictures you drew: a file that does not pass the check is never used (the shipped art stays)
+    try:
+        idx = json.loads((HOME / ".cache" / "ito" / "assets-index.json").read_text())
+    except (OSError, ValueError):
+        idx = None
+    if idx and (idx.get("files") or idx.get("slots") or idx.get("rejected")):
+        rej = idx.get("rejected") or {}
+        out.append(check("assets", "Your pictures", not rej,
+                         f"{len(idx.get('files') or {})} replace shipped art, {len(idx.get('slots') or {})} fill a named slot.",
+                         "Not used: " + "; ".join(f"{k} ({v})" for k, v in list(rej.items())[:3]) + (" ..." if len(rej) > 3 else "") + ".",
+                         why="A picture that fails the check is ignored; the shipped art stays.",
+                         fix="Fix or delete the file, or run: ito-assets ingest FILE --as SLOT", level="warn"))
+
+    # ---- the lock service answers `lock` with "ok" without locking when its `locked` binding went stale after an unlock
+    try:
+        guard = json.loads((sh([str(BIN / "ito-lock"), "guard"], timeout=10).strip().splitlines() or ["{}"])[-1])
+    except (ValueError, IndexError):
+        guard = {}
+    if guard.get("state") in ("ok", "stuck"):
+        out.append(check("lockstuck", "Lock screen", guard["state"] == "ok",
+                         "The lock service reports a consistent state, so the lock keybind works.",
+                         "The lock service says it is locked while nothing is locking (a stale state after an unlock).",
+                         why="The lock keybind (Ctrl+Super+L), the menu and idle lock do nothing until the shell restarts.",
+                         fix="Fix restarts the shell once (ito-health --fix restart).", fixId="restart", level="warn"))
+
+    # ---- upgrade drift: Omarchy / quickshell / Qt versions, our byte-for-byte copies (the Ito lock clones Omarchy's lock
+    # service), every Omarchy path, command and API we read. One implementation: bin/ito-compat (docs/UPGRADING.md).
+    try:
+        comp = json.loads(sh([str(BIN / "ito-compat"), "json"], timeout=60) or "{}")
+    except ValueError:
+        comp = {}
+    if comp:
+        cit = [i for i in comp.get("items", []) if i.get("level") != "info"]
+        notes = [i for i in comp.get("items", []) if i.get("level") == "info"]
+        listing = [{"title": i["what"], "count": 1, "file": "", "message": "", "why": i["safe"], "fix": i["fix"]} for i in cit + notes]
+        out.append(check("compat", "Omarchy compatibility", comp.get("state") == "ok",
+                         "Omarchy, quickshell and Qt match what this shell was verified on." + (f" Notes: {len(notes)} patch update(s)." if notes else ""),
+                         f"{len(cit)} thing(s) changed in Omarchy or the system since this shell was verified.",
+                         why="; ".join(i["safe"] for i in cit[:2]),
+                         fix=(cit[0]["fix"] if cit else "") + "  (details: ito-compat check)",
+                         level="fail" if comp.get("state") == "broken" else "warn", items=listing))
+
+    # ---- files made FROM the theme (lock screen, boot logo, terminal fetch, screensaver): after a theme change they can be older than it.
+    # Each tool already knows (`status` -> state "stale" when what it would write now differs from what it wrote); ask them, read-only.
+    stale = []
+    for surface, tool in (("lock screen", "ito-lock"), ("boot logo", "ito-plymouth"), ("terminal fetch", "ito-fastfetch"), ("screensaver", "ito-screensaver")):
+        try:
+            st = json.loads((sh([str(BIN / tool), "status"], timeout=10).strip().splitlines() or ["{}"])[0])
+        except (ValueError, IndexError):
+            continue
+        if st.get("state") == "stale":
+            stale.append({"tool": tool, "surface": surface, "at": (st.get("applied") or {}).get("at", "")})
+    out.append(check("themestale", "Theme-made files", not stale,
+                     "The lock screen, boot logo, fetch and screensaver match the current theme and settings.",
+                     "Out of date after a theme or settings change: " + ", ".join(i["surface"] for i in stale) + ".",
+                     why="They are drawn from the theme's colours when applied; a theme change does not redraw them unless their theme-follow switch is on, so they keep the old colours.",
+                     fix="Fix redraws the lock screen, fetch and screensaver. The boot logo needs a terminal (sudo): run ito-plymouth apply.",
+                     fixId="themestale", level="warn"))
+
+    # ---- fastfetch's chafa logo needs libchafa (dlopen); without it the logo silently falls back to Omarchy's about logo
+    try:
+        layout = json.loads((MODULES / "ito-style.json").read_text()).get("fastfetchLayout", "image")
+    except (OSError, ValueError, AttributeError):
+        layout = "image"
+    if layout == "image":
+        import glob
+        have = bool(glob.glob("/usr/lib/libchafa*") or glob.glob("/usr/lib64/libchafa*"))
+        out.append(check("libchafa", "Fetch image logo", have,
+                         "libchafa is installed, so the fastfetch image logo can be drawn.",
+                         "libchafa is not installed, so the fastfetch image logo falls back to Omarchy's logo.",
+                         why="fastfetch loads libchafa at run time for the chafa logo; without it the picture is skipped silently.",
+                         fix="Run in a terminal: sudo pacman -S chafa", level="warn"))
+
+    # ---- the error log of the live shell
+    pid = live_pid()
+    lines = []
+    if pid:
+        raw = sh(["journalctl", "--user", "--no-pager", "-t", "omarchy-shell", "-n", "8000"], timeout=15)
+        lines = [ln for ln in raw.splitlines() if f"omarchy-shell[{pid}]" in ln]
+    items = parse_log(lines)
+    ours = [i for i in items if i["where"] == "ours"]
+    other_items = [i for i in items if i["where"] == "other"]
+    ours_lines = sum(i["count"] for i in ours)
+    if ours:
+        out.append(check(
+            "errors", "Errors", False, "",
+            f"{len(ours)} distinct error{'s' if len(ours) != 1 else ''} in this shell ({ours_lines} log lines): "
+            + "; ".join(f"{i['title']} ({i['file'] or 'no file'})" for i in ours[:3]) + (" …" if len(ours) > 3 else ""),
+            why="Each is listed below with where it comes from, what it means and what to do.",
+            fix="Use Fix on an item, or Fix all. Restarting clears the log.", fixId="restart", level="warn", items=ours))
+    else:
+        out.append(check("errors", "Errors", True, "No errors from IKAI in this shell's log.", ""))
+    if other_items:
+        out.append({"id": "foreign", "name": "Other plugins", "status": "ok",
+                    "detail": f"{len(other_items)} error{'s' if len(other_items) != 1 else ''} come from plugins that are not "
+                              "IKAI and do not affect it.", "why": "", "fix": "", "fixId": "", "items": other_items})
+    return out
+
+
+# --------------------------------------------------------------------------------------------- AI report
+def version_of(cmd, pattern=None) -> str:
+    text = sh(cmd, timeout=5).strip().splitlines()
+    return text[0][:120] if text else "not found"
+
+
+def build_report() -> str:
+    checks = all_checks()
+    bad = [c for c in checks if c["status"] != "ok"]
+    root = repo_root()
+    L = []
+    add = L.append
+    add("# IKAI health report")
+    add("")
+    ver = (MODULES / "VERSION").read_text().strip() if (MODULES / "VERSION").exists() else "unknown"
+    add(f"IKAI {ver}, by davidxap (https://github.com/Davidxap/ikai-shell).")
+    add("")
+    add(f"Generated {time.strftime('%F %T')}. Written to be pasted into an AI assistant.")
+    add("")
+    add("## Instructions for the assistant")
+    add("")
+    add("The user runs **IKAI**, a Quickshell bar (inspired by Junji Ito and Silent Hill) for Omarchy on Arch Linux + Hyprland. "
+        "Your job is to fix the problems listed under *Findings* and confirm the shell is healthy afterwards.")
+    add("")
+    add("1. Read *Findings*. Each has `why` (what it breaks), `fix` (in words) and, when there is one, `fixId`.")
+    add("2. For a finding with a `fixId`, run `ito-health --fix <fixId>` (prints JSON `{ok, message}`). "
+        "`ito-health --fix all` runs every offered fix and restarts once at the end.")
+    add("3. Run `ito-health --text` again. Done when there is no `WARN` or `FAIL` line.")
+    add("4. Rules: restart only with `ito-restart` (never `pkill quickshell`, it also kills the terminal; never a bare "
+        "`omarchy-launch-shell`). One restart at a time; `ito-restart status` must end at `shells:1, launchers:1`. "
+        "Deploy repository files with `scripts/deploy.sh`, never by copying into the live folder. "
+        "Never create a Hyprland headless output without removing it.")
+    add("5. An error with no note below: quote the log line to the user and ask before changing anything.")
+    add(f"6. Tools live in `{BIN}`; the repository (if present) is `{root or 'not found on this machine'}`.")
+    add("")
+    add("## Summary")
+    add("")
+    add("**Healthy.**" if not bad else f"**{len(bad)} thing(s) need attention:** " + ", ".join(c["name"] for c in bad) + ".")
+    add("")
+    add("## Findings")
+    add("")
+    if not bad:
+        add("None.")
+    for c in bad:
+        add(f"### {c['name']} — {c['status'].upper()}")
+        add(f"- found: {c['detail']}")
+        if c.get("why"):
+            add(f"- why it matters: {c['why']}")
+        if c.get("fix"):
+            add(f"- what to do: {c['fix']}")
+        if c.get("fixId"):
+            add(f"- run: `ito-health --fix {c['fixId']}`")
+        for i in c.get("items", []):
+            add(f"- log x{i['count']} — {i['title']} ({i['file'] or 'no file'})")
+            add(f"  - line: `{i['message'][:300]}`")
+            add(f"  - means: {i['why']}")
+            add(f"  - do: {i['fix'] or 'nothing'}" + (f" (`ito-health --fix {i['fixId']}`)" if i.get("fixId") else ""))
+        add("")
+    add("## Checks that passed")
+    add("")
+    add(", ".join(c["name"] for c in checks if c["status"] == "ok") or "none")
+    add("")
+    add("## The machine")
+    add("")
+    osr = {}
+    try:
+        for ln in Path("/etc/os-release").read_text().splitlines():
+            if "=" in ln:
+                k, v = ln.split("=", 1)
+                osr[k] = v.strip('"')
+    except OSError:
+        pass
+    add(f"- OS: {osr.get('PRETTY_NAME', 'unknown')}; kernel {version_of(['uname', '-r'])}")
+    add(f"- Quickshell: {version_of(['quickshell', '--version'])}")
+    add(f"- Hyprland: {version_of(['hyprctl', 'version']).replace(chr(10), ' ')}")
+    add(f"- Omarchy: {version_of(['omarchy-version'])}")
+    add(f"- Python: {sys.version.split()[0]}; Qt: {version_of(['qmake6', '-query', 'QT_VERSION'])}")
+    try:
+        mons = json.loads(sh(["hyprctl", "monitors", "-j"]) or "[]")
+        add("- Monitors: " + "; ".join(f"{m['name']} {m['width']}x{m['height']}@{round(m.get('refreshRate', 0))} scale {m.get('scale')}" for m in mons))
+    except (ValueError, KeyError):
+        add("- Monitors: unknown")
+    add(f"- GPU: {version_of(['sh', '-c', 'lspci 2>/dev/null | grep -iE \"vga|3d\" | head -1'])}")
+    st = restart_status()
+    add(f"- Shell: {st.get('shells', '?')} running, {st.get('launchers', '?')} launcher(s), headless outputs: {st.get('headless') or 'none'}")
+    if root and (root / ".git").exists():
+        add(f"- Repository: {sh(['git', '-C', str(root), 'log', '-1', '--format=%h %s (%cd)', '--date=short']).strip()}; "
+            f"uncommitted files: {len(sh(['git', '-C', str(root), 'status', '--short']).splitlines())}")
+    add("")
+    add("## The bar as configured")
+    add("")
+    try:
+        cfg = json.loads((OMARCHY / "shell.json").read_text())
+        layout = cfg.get("bar", {}).get("layout", {})
+        add(f"- Bar: {cfg.get('bar', {}).get('id')} at {cfg.get('bar', {}).get('position', 'top')}")
+        for side in ("left", "center", "right"):
+            add(f"- {side}: " + ", ".join(e if isinstance(e, str) else e.get("id", "?") for e in layout.get(side, [])))
+        add(f"- disabledPlugins: {cfg.get('disabledPlugins')}")
+    except (OSError, ValueError):
+        add("- shell.json could not be read")
+    try:
+        style = json.loads((MODULES / "ito-style.json").read_text())
+        keep = {k: v for k, v in style.items() if not str(k).startswith("content:")}
+        add("- Look settings (ito-style.json): `" + json.dumps(keep, ensure_ascii=False)[:900] + "`")
+    except (OSError, ValueError):
+        add("- ito-style.json could not be read")
+    try:
+        plug = json.loads(sh([str(BIN / "ito-plugins")]) or "[]")
+        by = {}
+        for pl in plug:
+            by.setdefault(pl["source"], []).append(pl["id"])
+        add("- Plugins found: " + "; ".join(f"{k} {len(v)}" for k, v in by.items()))
+        add("- Third-party plugins: " + (", ".join(by.get("External", [])) or "none"))
+    except (ValueError, KeyError):
+        pass
+    add("")
+    add("## Recent log")
+    add("")
+    pid = live_pid()
+    raw = sh(["journalctl", "--user", "--no-pager", "-t", "omarchy-shell", "-n", "4000"], timeout=15) if pid else ""
+    hot = [ln for ln in raw.splitlines() if pid and f"[{pid}]" in ln and re.search(r"WARN|ERROR|Error|Cannot|failed", ln)]
+    add("```")
+    for ln in hot[-40:]:
+        add(re.sub(r"^\w+ \d+ [\d:]+ \S+ omarchy-shell\[\d+\]: *", "", ln)[:260])
+    if not hot:
+        add("(no warnings or errors from the running shell)")
+    add("```")
+    add("")
+    add("## Fixes this tool can apply")
+    add("")
+    add("| fixId | what it does |")
+    add("|---|---|")
+    for fid, what in FIXES.items():
+        add(f"| `{fid}` | {what} |")
+    add("")
+    add("## Where things live")
+    add("")
+    add("- Look and colours: `~/.config/omarchy/bar/modules/ito-style.json` (edit only with `ito-config`)")
+    add("- Bar layout and state: `~/.config/omarchy/shell.json` (the engine rewrites it; change it with `ito-design`, with the shell stopped)")
+    add("- Your pictures: `~/.config/ito/marks/`, `~/.config/ito/effects/`; adapted copies in `~/.cache/ito/marks/`")
+    add("- Saved setups: `~/.config/ito/profiles/` (`ito-profile list|save|load|delete`)")
+    add("- Plugins: `~/.config/omarchy/plugins/<id>/` (a `manifest.json` and a `BarWidget.qml`)")
+    add("- Live log: `journalctl --user -t omarchy-shell`")
+    # nothing that names the person or the machine goes into a report that is meant to be pasted somewhere
+    return ("\n".join(L) + "\n").replace(str(HOME), "~")
+
+
+FIXES = {
+    "restart": "restart the shell once, cleanly (ito-restart)",
+    "onebar": "remove extra bars or shells and restart once",
+    "headless": "remove leftover virtual screens; their windows return to the real one",
+    "seal": "switch the seal back on so the panel can be reached",
+    "plugins": "restore missing widget folders from the repository",
+    "markers": "rewrite the engine signature and restart",
+    "settings": "rewrite ito-style.json with the defaults",
+    "state": "apply the default design (writes the state block)",
+    "switch": "switch the shell back to IKAI when the engine fell back to another bar",
+    "lookreset": "put the sliders that are outside their range (glow, vibrance, speed, strength, icon size...) back to default",
+    "solidplate": "make the bar's plate solid (opacity 100%, glass off), so a moving wallpaper no longer shows through it",
+    "pictures": "rebuild your pictures' adapted copies; go back to the default for any that are gone",
+    "deploy": "copy the repository's files back into the live folder (scripts/deploy.sh)",
+}
+
+
+# ---------------------------------------------------------------------------------------------------- fixes
+def run(cmd, detached=False):
+    if detached:
+        subprocess.Popen(["setsid", "-f"] + cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+        return True, ""
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    return r.returncode == 0, (r.stdout + r.stderr).strip()
+
+
+def fix(fid: str):
+    root = repo_root()
+    if fid == "restart":
+        run([str(BIN / "ito-restart")], detached=True)
+        return True, "Restarting the shell."
+    if fid == "onebar":
+        run([str(BIN / "ito-onebar")])
+        run([str(BIN / "ito-restart")], detached=True)
+        return True, "Removed the extra bars and restarted once."
+    if fid == "headless":
+        heads = restart_status().get("headless", [])
+        for h in heads:
+            run(["hyprctl", "output", "remove", h])
+        return True, f"Removed {', '.join(heads) or 'nothing'}; windows return to your screen."
+    if fid == "seal":
+        ok, msg = run([str(BIN / "ito-recover"), "--seal"])
+        return ok, msg or "The seal is back on the bar."
+    if fid == "plugins":
+        if root and (root / "scripts/deploy.sh").exists():
+            run([str(root / "scripts/deploy.sh")])
+        ok, msg = run([str(BIN / "ito-recover")])
+        return ok, "Restored the widgets from the repository." if ok else (msg or "ito-recover failed.")
+    if fid == "markers":
+        if not root:
+            return False, "The repository is not at hand to rewrite the signature."
+        ok, msg = run([sys.executable, str(root / "scripts/gen-itobar-marker.py")])
+        if ok:
+            run([str(BIN / "ito-restart")], detached=True)
+            return True, "Rewrote the signature and restarted."
+        return False, msg or "Could not rewrite the signature."
+    if fid == "settings":
+        ok, msg = run([str(BIN / "ito-config"), "reset"])
+        return ok, "Settings rewritten with the defaults." if ok else (msg or "ito-config reset failed.")
+    if fid == "state":
+        ok, msg = run([str(BIN / "ito-design"), "--classic"])
+        return ok, "Applied the default design." if ok else (msg or "ito-design --classic failed.")
+    if fid == "switch":
+        tool = shutil_which("shell-switch") or (str(root / "scripts/shell-switch") if root else "")
+        if not tool:
+            return False, "shell-switch was not found; run scripts/shell-switch ito from the repository."
+        run([tool, "ito"], detached=True)
+        return True, "Switching back to IKAI; the bar returns in a few seconds."
+    if fid == "solidplate":
+        run([str(BIN / "ito-config"), "set", "surfaceOpacity", "1"])
+        run([str(BIN / "ito-config"), "set", "fxGlass", "false"])
+        return True, "The plate is solid now; the wallpaper's motion no longer shows through it."
+    if fid == "lookreset":
+        try:
+            data = json.loads((MODULES / "ito-style.json").read_text())
+        except (OSError, ValueError):
+            data = {}
+        ranges = {"light": (0, 2.5), "vibrance": (0.3, 2), "fxSpeed": (0.2, 3), "fxStrength": (0.2, 2.5),
+                  "iconScale": (0.4, 1.0), "wsArtScale": (0.2, 1.2), "markScale": (0.2, 1.2), "surfaceOpacity": (0.05, 1), "popupSeconds": (0, 60)}
+        bad = []
+        for k, (lo, hi) in ranges.items():
+            if k in data:
+                try:
+                    if not (lo <= float(data[k]) <= hi):
+                        bad.append(k)
+                except (TypeError, ValueError):
+                    bad.append(k)
+        if bad:
+            run([str(BIN / "ito-config"), "unset"] + bad)
+        return True, ("Put back to default: " + ", ".join(bad) + ".") if bad else "Nothing was out of range."
+    if fid == "pictures":
+        ok_all, notes = True, []
+        ok, _ = run([str(BIN / "ito-marks"), "list"])
+        ok_all &= ok
+        notes.append("Rebuilt the adapted copies of your pictures." if ok else "Could not rebuild the adapted copies (ito-marks list failed).")
+        cache = Path.home() / ".cache" / "ito" / "marks"
+        cfg = BIN / "ito-config"
+        try:
+            data = json.loads((MODULES / "ito-style.json").read_text())
+        except (OSError, ValueError):
+            data = {}
+        if data.get("style") == "custom" and not (cache / "_ws-active.png").exists():
+            ok, _ = run([str(cfg), "set", "style", "orbs"])
+            ok_all &= ok
+            notes.append("The Custom workspace style had no pictures, so it went back to Rings." if ok else "The Custom workspace style has no pictures and could not be reset.")
+        if data.get("mediaFx") == "custom" and not (Path.home() / ".config/ito/effects/custom").exists():
+            ok, _ = run([str(cfg), "set", "mediaFx", "blood"])
+            ok_all &= ok
+            notes.append("The media effect had no file, so it went back to Blood." if ok else "The media effect has no file and could not be reset.")
+        return ok_all, " ".join(notes)
+    if fid == "themestale":
+        notes = []
+        for tool, args, label in (("ito-lock", ["apply"], "lock screen"), ("ito-fastfetch", ["apply"], "terminal fetch"), ("ito-screensaver", ["apply-text"], "screensaver")):
+            try:
+                st = json.loads((sh([str(BIN / tool), "status"], timeout=10).strip().splitlines() or ["{}"])[0])
+            except (ValueError, IndexError):
+                continue
+            if st.get("state") != "stale":
+                continue
+            if tool == "ito-fastfetch":
+                args = ["apply", str((st.get("applied") or {}).get("layout") or "")] if (st.get("applied") or {}).get("layout") else ["apply"]
+            ok, _ = run([str(BIN / tool)] + args)
+            notes.append(f"{label}: {'redrawn' if ok else 'could not be redrawn'}")
+        return True, ("; ".join(notes) or "Nothing needed redrawing.") + ". The boot logo needs: ito-plymouth apply (terminal, sudo)."
+    if fid == "deploy":
+        if not root or not (root / "scripts/deploy.sh").exists():
+            return False, "The repository is not at hand: reinstall the shell to bring the files back."
+        ok, msg = run([str(root / "scripts/deploy.sh")])
+        return ok, "Copied the files back from the repository." if ok else msg
+    return False, f"No fix named {fid}."
+
+
+# --------------------------------------------------------------------------------------------------- report
+def as_text(checks) -> str:
+    lines = [f"IKAI health, {time.strftime('%F %T')}", ""]
+    for c in checks:
+        mark = {"ok": "ok  ", "warn": "WARN", "fail": "FAIL"}[c["status"]]
+        lines.append(f"[{mark}] {c['name']}: {c['detail']}")
+        if c.get("why"):
+            lines.append(f"       why: {c['why']}")
+        if c.get("fix"):
+            lines.append(f"       fix: {c['fix']}" + (f"   (ito-health --fix {c['fixId']})" if c.get("fixId") else ""))
+        for i in c.get("items", []):
+            lines.append(f"       - x{i['count']} {i['title']} [{i['where']}] {i['file']}")
+            lines.append(f"           {i['message']}")
+    return "\n".join(lines)
+
+
+def as_table() -> str:
+    rows = ["# Troubleshooting", "",
+            "Made from `bar/modules/bin/ito-health`. Run `ito-health` for the live report and "
+            "`ito-health --fix all` to apply every offered fix.", "",
+            "| Log message matches | What it is | What it means | What to do | Fix |", "|---|---|---|---|---|"]
+    for k in KNOWN:
+        if k["where"] == "noise":
+            continue
+        fixcmd = f"`ito-health --fix {k['fixId']}`" if k["fixId"] else "—"
+        rows.append(f"| `{k['re']}` | {k['title']} | {k['why']} | {k['fix'] or '—'} | {fixcmd} |")
+    rows += ["", "Harmless, hidden from the report: " + ", ".join(k["title"] for k in KNOWN if k["where"] == "noise") + "."]
+    return "\n".join(rows)
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if args[:1] == ["--table"]:
+        print(as_table())
+        return 0
+    if args[:1] == ["--fix"] and len(args) > 1:
+        target = args[1]
+        if target == "all":
+            ids = []
+            for c in all_checks():
+                if c["status"] != "ok" and c.get("fixId") and c["fixId"] not in ids:
+                    ids.append(c["fixId"])
+            ids.sort(key=lambda i: i in ("restart", "onebar", "markers"))       # restarts last: one, after the rest
+            results = [(i, fix(i)) for i in ids]
+            msgs = [f"{i}: {msg}" for i, (ok, msg) in results]
+            all_ok = all(ok for _, (ok, _msg) in results)
+            json.dump({"ok": all_ok, "message": " ".join(msgs) or "Nothing needed fixing."}, sys.stdout)
+            return 0
+        ok, msg = fix(target)
+        json.dump({"ok": ok, "message": msg}, sys.stdout)
+        return 0
+    if args[:1] == ["--report"]:
+        text = build_report()
+        if "--save" in args:
+            path = HOME / "ito-health-report.md"
+            path.write_text(text)
+            json.dump({"ok": True, "message": f"Saved to {path}"}, sys.stdout)
+        else:
+            sys.stdout.write(text)
+        return 0
+    checks = all_checks()
+    if args[:1] == ["--text"]:
+        print(as_text(checks))
+        return 0
+    json.dump(checks, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

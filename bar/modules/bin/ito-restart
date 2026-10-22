@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# ito-restart — stop and start the shell so that exactly one is left running.
+#
+# Omarchy's launcher (omarchy-launch-shell) is a restart LOOP: kill quickshell under it and it starts a new one a
+# second later. Anything that kills quickshell and then starts a launcher of its own ends with two shells, and two
+# bars stacked on the same edge. So the loop is always stopped first, by exact match, and a start always checks
+# afterwards that one shell and one loop are left, removing any extra.
+#
+#   ito-restart            stop, then start one
+#   ito-restart stop       stop the loop and every shell of this config, and wait until they are gone
+#   ito-restart start      start one (after making sure none is left)
+#   ito-restart ensure     only fix a running session: keep the newest shell and loop, remove the rest
+#   ito-restart status     print JSON: {"shells":N,"launchers":N,"headless":[...]}
+#
+# Matching is by exact process name / exact launcher command line, never `pkill -f quickshell`, which also kills
+# any terminal command that merely contains the word.
+set -uo pipefail
+
+LAUNCHER_RE='^(/usr)?/bin/(ba)?sh( -[a-z]+)* [^ ]*/omarchy-launch-shell( |$)'
+LOCK="${XDG_RUNTIME_DIR:-/tmp}/ito-restart.lock"
+LOG="${XDG_STATE_HOME:-$HOME/.local/state}/ito/restart.log"
+mkdir -p "$(dirname "$LOG")"
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; }
+# Only the real shell counts: an offscreen lab quickshell (own -p path) is not a second bar, and
+# SIGTERMing it as a "leftover" used to take the real shell down with it.
+shells() { pgrep -f '^quickshell( .*)? -p /usr/share/omarchy/shell( |$)' 2>/dev/null; }
+launchers() { pgrep -f "$LAUNCHER_RE" 2>/dev/null; }
+count() { "$1" | grep -c . ; }
+
+do_stop() {
+  local p
+  for p in $(launchers); do kill -TERM "$p" 2>/dev/null; done
+  # Omarchy's own clean kill: returns only once that instance has exited
+  while timeout 5 quickshell kill -p /usr/share/omarchy/shell --any-display >/dev/null 2>&1; do :; done
+  for p in $(shells); do kill -TERM "$p" 2>/dev/null; done
+  local i
+  for i in $(seq 1 60); do
+    [[ -z "$(shells)$(launchers)" ]] && return 0
+    sleep 0.1
+  done
+  for p in $(launchers) $(shells); do kill -KILL "$p" 2>/dev/null; done
+  sleep 0.3
+  log "stop needed SIGKILL"
+}
+
+# Keep the newest shell and the newest loop; anything older is a leftover.
+do_ensure() {
+  local extra=0 p
+  local ls; ls=$(launchers | sort -n)
+  if [[ $(echo "$ls" | grep -c .) -gt 1 ]]; then
+    for p in $(echo "$ls" | head -n -1); do kill -TERM "$p" 2>/dev/null; extra=1; done
+  fi
+  sleep 0.2
+  local ss; ss=$(shells | sort -n)
+  if [[ $(echo "$ss" | grep -c .) -gt 1 ]]; then
+    for p in $(echo "$ss" | head -n -1); do kill -TERM "$p" 2>/dev/null; extra=1; done
+  fi
+  [[ $extra -eq 1 ]] && log "ensure removed leftover shells or loops"
+  return 0
+}
+
+do_start() {
+  [[ -n "$(shells)$(launchers)" ]] && do_stop
+  # spawned from the compositor, so it inherits the session environment, as omarchy-restart-shell does
+  if ! hyprctl dispatch 'hl.dsp.exec_cmd("omarchy-launch-shell")' >/dev/null 2>&1; then
+    setsid omarchy-launch-shell >/dev/null 2>&1 </dev/null &
+  fi
+  local i
+  for i in $(seq 1 80); do
+    omarchy-shell shell ping >/dev/null 2>&1 && break
+    sleep 0.25
+  done
+  sleep 1
+  do_ensure
+}
+
+status() {
+  local heads
+  heads=$(hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys; print(json.dumps([m["name"] for m in json.load(sys.stdin) if m["name"].startswith("HEADLESS")]))' 2>/dev/null || echo '[]')
+  printf '{"shells":%d,"launchers":%d,"headless":%s}\n' "$(shells | grep -c .)" "$(launchers | grep -c .)" "$heads"
+}
+
+cmd="${1:-restart}"
+if [[ "$cmd" == status ]]; then status; exit 0; fi
+
+exec 9>"$LOCK"
+flock -w 30 9 || { echo "another restart is running" >&2; exit 1; }
+# the shell started below inherits fd 9; release the lock ourselves when we end
+trap 'flock -u 9 2>/dev/null' EXIT
+
+case "$cmd" in
+  stop)    do_stop ;;
+  start)   do_start ;;
+  ensure)  do_ensure ;;
+  restart) do_stop; do_start ;;
+  *) echo "usage: ito-restart [restart|stop|start|ensure|status]" >&2; exit 2 ;;
+esac
+log "$cmd -> $(status)"
+status

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.bar",
+  "name": "Ito Bar",
+  "version": "0.1.1-beta.14.1-ito.1",
+  "author": "HANCORE (fork by davidxap)",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "license": "MIT",
+  "description": "The Ito full-bar host for Omarchy Shell.",
+  "kinds": [
+    "bar"
+  ],
+  "entryPoints": {
+    "bar": "Bar.qml"
+  },
+  "x-shibumi": {
+    "suiteId": "ito.verse",
+    "bundle": "core",
+    "role": "bar-host",
+    "requires": [
+      "ito.state"
+    ],
+    "recommends": [
+      "hancore.shibumi.reactor"
+    ]
+  }
+}

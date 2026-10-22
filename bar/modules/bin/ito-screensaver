@@ -1,0 +1,824 @@
+#!/usr/bin/env bash
+# ito-screensaver — Ito branding text for Omarchy's screensaver, plus an optional idle hook that starts it for you.
+#
+# The screensaver itself (omarchy-launch-screensaver, ttfx) is stock Omarchy; this only swaps the text it drifts
+# across the screen and, if you turn the hook on, adds one hypridle listener that calls it before the lock does.
+#
+# Who starts it (boot-lock-v2 §5.1): Omarchy's idle service owns the timer (shell.json idle.screensaver, 150 s). Ito installs its
+# own hypridle listener ONLY when the lock owner is hyprlock (`lockEngine = hyprlock`); otherwise two screensavers would start.
+# The text is art: `screensaverText` = spiral (default) | eye | fog | custom | stock; none of them names the project.
+#
+# Usage: ito-screensaver apply                     apply-text, then install-idle only when hyprlock owns the lock
+#        ito-screensaver apply-text                give the screensaver the Ito text (your own is saved first)
+#        ito-screensaver revert                     text back from its backup; hypridle.conf only loses the Ito block
+#        ito-screensaver install-idle               add the idle listener (240s, before the 300s lock)
+#        ito-screensaver remove-idle                take the idle listener back out; nothing else in the file changes
+#        ito-screensaver start                       what the idle listener calls at 240s (honours screensaver-off)
+#        ito-screensaver stop                        what the idle listener calls on-resume
+#        ito-screensaver status                       what is installed right now (state, who starts it, issues)
+#        ito-screensaver use-omarchy-timer            remove the Ito hypridle listener (strip only); Omarchy's timer remains
+#        ito-screensaver effects                      the effect set for the page and every effect ttfx offers
+#        ito-screensaver launch [force]               Omarchy's launcher, run with the Ito runner (bin/ito-screensaver-launch)
+#        ito-screensaver run [--dry-run]              the runner itself: one effect after another, colours from the theme
+#        ito-screensaver preview-image [text] [--themes a,b,c,d] [--palette restrained|classic] [--grid COLSxROWS]
+#                                                    a PNG of the art at that screen size with the final gradient (nothing runs)
+#
+# boot-screens-v2 B.3: the runner sizes the art to the screen it starts on (`text-<cols>x<rows>-<set>.txt` in the cache), empty cells
+# are ASCII spaces, `screensaverFps` (30-120, default 120) sets ttfx's frame rate, `screensaverPalette` classic (default) | restrained
+# sets the colours, and ITO_SCREENSAVER_CLASS (default org.omarchy.screensaver) lets a lab run use its own window class.
+#
+# Every command prints one JSON line and exits 0, or prints {"error": ...} and exits 1. Running apply-text or
+# install-idle twice with nothing changed does nothing the second time.
+set -euo pipefail
+ITO_BIN_DIR="$(dirname "$(readlink -f "$0")")"
+export ITO_BIN_DIR
+
+python3 - "$@" <<'PY'
+import json, os, re, subprocess, sys, tempfile, time
+from pathlib import Path
+
+sys.path.insert(0, os.environ.get("ITO_BIN_DIR", "."))
+import ito_colours as COL
+import ito_art as ART
+
+HOME = Path(os.environ.get("HOME", "~")).expanduser()
+BK = HOME / ".config" / "ito" / "backups"
+BRANDING = HOME / ".config" / "omarchy" / "branding" / "screensaver.txt"
+HYPRIDLE = HOME / ".config" / "hypr" / "hypridle.conf"
+CLASS = os.environ.get("ITO_SCREENSAVER_CLASS") or "org.omarchy.screensaver"      # T7: a lab run uses its own class
+TOGGLE_OFF = HOME / ".local" / "state" / "omarchy" / "toggles" / "screensaver-off"
+# The deployed copy is what hypridle actually calls; scripts/deploy.sh puts it here from bar/modules/bin/.
+SELF = HOME / ".config" / "omarchy" / "bar" / "modules" / "bin" / "ito-screensaver"
+
+MARK_BEGIN = "# >>> ito-verse screensaver"
+MARK_END = "# <<< ito-verse screensaver"
+IDLE_TIMEOUT = 240   # must stay below the 300s lock stage (see hypridle.conf)
+
+
+def out(obj, code=0):
+    print(json.dumps(obj))
+    sys.exit(code)
+
+
+def fail(message):
+    out({"error": message}, 1)
+
+
+def stamp():
+    return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+
+
+def read(path):
+    try:
+        return path.read_text()
+    except OSError:
+        return None
+
+
+def write_atomic(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".")
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+
+
+def backup(path, text):
+    """Keep a timestamped copy of a file about to be replaced; the first one ever is also the .orig."""
+    BK.mkdir(parents=True, exist_ok=True)
+    (BK / f"{path.name}.{stamp()}").write_text(text)
+    orig, absent = BK / f"{path.name}.orig", BK / f"{path.name}.orig.absent"
+    if not orig.exists():
+        orig.write_text(text)
+        absent.unlink(missing_ok=True)
+
+
+def note_absent(path):
+    """Record that a file did not exist before we touched it, so revert can remove it again."""
+    BK.mkdir(parents=True, exist_ok=True)
+    orig, absent = BK / f"{path.name}.orig", BK / f"{path.name}.orig.absent"
+    if not orig.exists() and not absent.exists():
+        absent.write_text(f"there was no {path.name} before ito-screensaver\n")
+
+
+TEXT_SETS = ("spiral", "eye", "fog", "custom", "stock")
+CUSTOM_TEXT = HOME / ".config" / "ito" / "screensaver-custom.txt"
+OMARCHY_PATH = Path(os.environ.get("OMARCHY_PATH") or "/usr/share/omarchy")
+NAME_RE = re.compile(r"ito.?.?verse|\bITO\b", re.I)
+
+
+def text_set():
+    s = str(COL.style().get("screensaverText") or "spiral")
+    return s if s in TEXT_SETS else "spiral"
+
+
+def text_for(name=None):
+    """(text, note): the screensaver text of a set. spiral, eye and fog are drawn; custom is yours; stock is Omarchy's logo."""
+    name = name or text_set()
+    note = ""
+    if name == "custom":
+        t = read(CUSTOM_TEXT)
+        if t and t.strip():
+            return t if t.endswith("\n") else t + "\n", note
+        name, note = "spiral", "custom_missing"
+    if name == "stock":
+        t = read(OMARCHY_PATH / "logo.txt")
+        if t:
+            return t, note
+        name, note = "spiral", "stock_missing"
+    text = {"spiral": ART.spiral_text, "eye": ART.eye_plain, "fog": ART.fog_text}[name]().replace("\u2800", " ")   # T2: ttfx draws U+2800
+    if NAME_RE.search(text):                        # a generated set never carries the project's name
+        fail(f"the {name} text names the project; refusing to write it")
+    return text, note
+
+
+def art_size(name, cols, rows):
+    """T1: (art_cols, art_rows) of a generated set on a cols x rows screen: 36 % of the width (70..180 cells), the set's own aspect, at
+    most rows - 4 tall (then the width follows)."""
+    ratio = 26 / 54 if name == "eye" else 24 / 70
+    ac = max(70, min(180, round(0.36 * cols)))
+    ar = round(ac * ratio)
+    if ar > rows - 4:
+        ar = max(8, rows - 4)
+        ac = max(16, round(ar / ratio))
+    ac = min(ac, max(16, cols - 2))
+    return ac, ar
+
+
+def text_sized(name, cols, rows):
+    """(text, note) for one screen. custom and stock are yours / Omarchy's and are shown as they are."""
+    name = name or text_set()
+    if name in ("custom", "stock") or cols <= 0 or rows <= 0:
+        return text_for(name)
+    _t, note = text_for(name)
+    ac, ar = art_size(name, cols, rows)
+    gen = {"spiral": ART.spiral_text, "eye": ART.eye_sized, "fog": ART.fog_text}[name]
+    text = gen(ac, ar).replace("\u2800", " ")
+    if NAME_RE.search(text):
+        fail(f"the {name} text names the project; refusing to write it")
+    return text, note
+
+
+def screen_size():
+    """cols, rows of this terminal: the pty when it is one, else COLUMNS/LINES, else a 2560 x 1440 screen at 7 x 16.5 px cells."""
+    try:
+        c, r = os.get_terminal_size(1)
+        if c > 0 and r > 0:
+            return c, r
+    except OSError:
+        pass
+    try:
+        c, r = int(os.environ.get("COLUMNS", 0)), int(os.environ.get("LINES", 0))
+        if c > 0 and r > 0:
+            return c, r
+    except ValueError:
+        pass
+    return 365, 87
+
+
+def screen_text_file(cols, rows):
+    """Write ~/.cache/ito/screensaver/text-<cols>x<rows>-<set>.txt (T1) and return (path, note); the branding file when it cannot."""
+    name = text_set()
+    try:
+        text, note = text_sized(name, cols, rows)
+        f = CACHE / f"text-{cols}x{rows}-{name}.txt"
+        if read(f) != text:
+            write_atomic(f, text)
+        return f, note
+    except OSError:
+        return BRANDING, ""
+
+
+def cmd_apply_text():
+    text, tnote = text_for()
+    current = read(BRANDING)
+    if current == text:
+        out({"ok": True, "changed": False})
+    if current is None:
+        note_absent(BRANDING)
+    else:
+        backup(BRANDING, current)
+    write_atomic(BRANDING, text)
+    BK.mkdir(parents=True, exist_ok=True)
+    APPLIED.write_text(sha12(text) + "\n")
+    out({"ok": True, "changed": True, "set": text_set(), "backup": str(BK / f"{BRANDING.name}.orig"),
+         **({"note": tnote} if tnote else {})})
+
+
+def restart_hypridle():
+    if os.environ.get("ITO_SCREENSAVER_OFFLINE") == "1":   # tests on a fixture HOME: never touch the real daemon
+        return
+    subprocess.run(["pkill", "-x", "hypridle"], check=False)
+    subprocess.Popen(
+        ["setsid", "hypridle"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def cmd_revert():
+    """The text comes back from its .orig; hypridle.conf only loses the Ito block (strip-only: a whole-file restore
+    would also undo any later hand edit of that file)."""
+    restored = {}
+    orig, absent = BK / f"{BRANDING.name}.orig", BK / f"{BRANDING.name}.orig.absent"
+    cur = read(BRANDING)
+    if orig.is_file():
+        wanted = orig.read_text()
+        if cur == wanted:
+            restored[BRANDING.name] = "unchanged"
+        else:
+            write_atomic(BRANDING, wanted)
+            restored[BRANDING.name] = "restored"
+    elif absent.exists():
+        if BRANDING.exists():
+            BRANDING.unlink()
+            restored[BRANDING.name] = "removed"
+        else:
+            restored[BRANDING.name] = "unchanged"
+    else:
+        restored[BRANDING.name] = "no backup"
+    APPLIED.unlink(missing_ok=True)
+    idle = read(HYPRIDLE)
+    restarted = False
+    if idle is not None and MARK_BEGIN in idle:
+        backup(HYPRIDLE, idle)
+        write_atomic(HYPRIDLE, strip_block(idle))
+        restored[HYPRIDLE.name] = "block removed"
+        restart_hypridle()
+        restarted = True
+    else:
+        restored[HYPRIDLE.name] = "untouched"
+    out({"ok": True, "changed": any(v not in ("unchanged", "untouched", "no backup") for v in restored.values()),
+         "restored": restored, "hypridle": "restarted" if restarted else "untouched"})
+
+
+def hyprlock_owns():
+    """Ito's own hypridle listener only makes sense when hyprlock owns the lock (card C); with Omarchy's idle in charge
+    (cards A and B, or nothing chosen yet) its 150 s screensaver is the one."""
+    return str(COL.style().get("lockEngine") or "") == "hyprlock"
+
+
+def cmd_apply():
+    """apply-text, then install-idle ONLY when hyprlock owns the lock; one run, one answer."""
+    def step(fn):
+        import io, contextlib
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                fn()
+        except SystemExit as e:
+            code = e.code or 0
+        else:
+            code = 0
+        try:
+            return code, json.loads(buf.getvalue().strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            return code, {"error": buf.getvalue().strip() or "no answer"}
+    code, text = step(cmd_apply_text)
+    if code != 0:
+        out({"error": "text: " + str(text.get("error")), "text": text}, 1)
+    if not hyprlock_owns():
+        out({"ok": True, "changed": bool(text.get("changed")), "text": text,
+             "idle": {"changed": False, "reason": "Omarchy's idle starts the screensaver"}})
+    code, idle = step(cmd_install_idle)
+    if code != 0:
+        out({"error": "idle: " + str(idle.get("error")), "text": text, "idle": idle}, 1)
+    out({"ok": True, "changed": bool(text.get("changed") or idle.get("changed")), "text": text, "idle": idle})
+
+
+def count_rules(text):
+    return len(re.findall(r"^\s*listener\s*\{", text, re.M))
+
+
+def validate_hypridle(candidate_path, expected_rules):
+    """hypridle does not fail hard on a bad config -- it logs 'Config has errors' and keeps whatever parsed, so
+    the only reliable check is: no error line, and the rule count matches what we expect."""
+    try:
+        proc = subprocess.run(
+            ["timeout", "3", "hypridle", "-c", str(candidate_path)],
+            capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        return False, "hypridle binary not found"
+    log = proc.stdout + proc.stderr
+    if "Config has errors" in log:
+        return False, "hypridle reported a config error"
+    m = re.search(r"found (\d+) rules", log)
+    if not m:
+        return False, "could not confirm the rule count (hypridle produced no 'found N rules' line)"
+    found = int(m.group(1))
+    if found != expected_rules:
+        return False, f"expected {expected_rules} rules, hypridle parsed {found}"
+    return True, ""
+
+
+def installed_snippet():
+    """The exact text install-idle inserts; remove-idle removes this same string, so the two are exact inverses
+    and the file is byte-identical to before once the block is gone."""
+    return (
+        f"{MARK_BEGIN}\n"
+        f"listener {{\n"
+        f"    timeout = {IDLE_TIMEOUT}\n"
+        f"    on-timeout = {SELF} start\n"
+        f"    on-resume = {SELF} stop\n"
+        f"}}\n"
+        f"{MARK_END}\n"
+        f"\n"
+    )
+
+
+def strip_block(text):
+    snippet = installed_snippet()
+    if snippet in text:
+        return text.replace(snippet, "", 1)
+    # The block is present but something (a hand edit) changed the spacing around it: fall back to removing just
+    # the marked lines themselves, so remove-idle still works even if it can no longer promise byte-identical.
+    pattern = re.compile(re.escape(MARK_BEGIN) + r".*?" + re.escape(MARK_END) + r"\n?", re.S)
+    return pattern.sub("", text)
+
+
+def insert_block(text):
+    """Placed right before the 300s lock listener, per design.md, so the screensaver always precedes the lock."""
+    snippet = installed_snippet()
+    m = re.search(r"^listener\s*\{[^}]*timeout\s*=\s*300\b", text, re.M | re.S)
+    if m:
+        return text[:m.start()] + snippet + text[m.start():]
+    # No 300s lock stage found (unexpected shape): append at the end rather than guess where "before" means.
+    sep = "" if text.endswith("\n") else "\n"
+    return text + sep + "\n" + snippet
+
+
+def cmd_install_idle():
+    current = read(HYPRIDLE)
+    if current is None:
+        fail(f"{HYPRIDLE} does not exist; nothing to add the listener to")
+    if MARK_BEGIN in current:
+        out({"ok": True, "changed": False, "reason": "already installed"})
+    candidate = insert_block(current)
+    expected = count_rules(candidate)
+    fd, tmp = tempfile.mkstemp(prefix="ito-hypridle-candidate.")
+    os.close(fd)
+    tmp_path = Path(tmp)
+    tmp_path.write_text(candidate)
+    ok, reason = validate_hypridle(tmp_path, expected)
+    if not ok:
+        tmp_path.unlink(missing_ok=True)
+        fail(f"candidate hypridle.conf failed validation ({reason}); live file left untouched")
+    backup(HYPRIDLE, current)
+    write_atomic(HYPRIDLE, candidate)
+    tmp_path.unlink(missing_ok=True)
+    restart_hypridle()
+    out({"ok": True, "changed": True, "timeout": IDLE_TIMEOUT, "hypridle": "restarted"})
+
+
+def cmd_remove_idle():
+    current = read(HYPRIDLE)
+    if current is None:
+        fail(f"{HYPRIDLE} does not exist")
+    if MARK_BEGIN not in current:
+        out({"ok": True, "changed": False, "reason": "not installed"})
+    candidate = strip_block(current)
+    backup(HYPRIDLE, current)
+    write_atomic(HYPRIDLE, candidate)
+    restart_hypridle()
+    out({"ok": True, "changed": True, "hypridle": "restarted"})
+
+
+LAUNCHER = SELF.with_name("ito-screensaver-launch")
+CACHE = HOME / ".cache" / "ito" / "screensaver"
+ITO_EFFECTS = [
+    ("smoke", "霧", "Silent Hill's fog swallowing the town"), ("rings", "渦", "Uzumaki's spirals"),
+    ("blackhole", "淵", "the whirlpool at Kurouzu-cho"), ("crumble", "灰", "Tomie's flesh falling apart and regrowing"),
+    ("vhstape", "映", "Silent Hill's videotape and radio static"), ("burn", "錆", "the Otherworld peeling to rust"),
+    ("spotlights", "灯", "the flashlight searching"), ("swarm", "魚", "Gyo's walking swarm")]
+
+
+def ttfx_version():
+    try:
+        return subprocess.run(["ttfx", "--version"], capture_output=True, text=True, timeout=5).stdout.strip().replace(" ", "-") or "none"
+    except (OSError, subprocess.SubprocessError):
+        return "none"
+
+
+def all_effects():
+    """Every effect ttfx offers (its Commands list), cached per ttfx version."""
+    f = CACHE / f"effects-{ttfx_version()}.json"
+    try:
+        return json.loads(f.read_text())
+    except (OSError, ValueError):
+        pass
+    try:
+        txt = subprocess.run(["ttfx", "--help"], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    m = re.search(r"^Commands:\n(.*?)\n\nOptions:", txt, re.S | re.M)
+    names = [l.split()[0] for l in (m.group(1).splitlines() if m else []) if l.strip() and l.split()[0] != "help"]
+    if names:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(names))
+    return names
+
+
+def effect_options(effect):
+    """The colour options of one effect: [(flag, multi)], parsed from `ttfx <effect> --help` and cached per version."""
+    f = CACHE / f"flags-{ttfx_version()}.json"
+    try:
+        cache = json.loads(f.read_text())
+    except (OSError, ValueError):
+        cache = {}
+    if effect not in cache:
+        try:
+            txt = subprocess.run(["ttfx", effect, "--help"], capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            txt = ""
+        opts = []
+        for m in re.finditer(r"^\s+(--[a-z0-9-]+)\s+<[A-Z0-9_]+>(\.\.\.)?", txt, re.M):
+            flag, multi = m.group(1), bool(m.group(2))
+            if re.search(r"-(colors?|gradient-stops|gradient)$", flag) and "direction" not in flag and "steps" not in flag:
+                opts.append([flag, multi])
+        cache[effect] = opts
+        CACHE.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(cache))
+    return [tuple(o) for o in cache[effect]]
+
+
+def mix(a, b, t):
+    """Hex colour a -> b by t (0..1), without '#'."""
+    ra = [int(a.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    rb = [int(b.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    return "".join("%02X" % round(x + (y - x) * t) for x, y in zip(ra, rb))
+
+
+def palette():
+    p = str(COL.style().get("screensaverPalette") or "classic")
+    return p if p in ("classic", "restrained") else "classic"
+
+
+def colour_flags(effect, pal=None):
+    """ttfx colour flags from the theme (never fixed). classic (today): the final gradient runs bone to lit, every other colour list
+    blood, lit, bone, a single colour blood. restrained (T4): the final gradient bone to bone-with-30%-blood, lists
+    bone, bone-darkened-45%-to-ink, blood (blood last = least), a single colour bone. Hex without '#'."""
+    c, _ = COL.resolve()
+    h = lambda k: c[k].lstrip("#").upper()
+    pal = pal or palette()
+    out = []
+    for flag, multi in effect_options(effect):
+        if pal == "restrained":
+            if flag == "--final-gradient-stops":
+                out += [flag, h("bone"), mix(c["bone"], c["blood"], 0.30)]
+            elif multi:
+                out += [flag, h("bone"), mix(c["bone"], c["ink"], 0.45), h("blood")]
+            else:
+                out += [flag, h("bone")]
+        elif flag == "--final-gradient-stops":
+            out += [flag, h("bone"), h("lit")]
+        elif multi:
+            out += [flag, h("blood"), h("lit"), h("bone")]
+        else:
+            out += [flag, h("blood")]
+    return out
+
+
+def ground():
+    c, _ = COL.resolve()
+    return "#000000" if str(COL.style().get("screensaverGround") or "ink") == "black" else c["ink"]
+
+
+def pick_effect():
+    e = str(COL.style().get("screensaverEffect") or "random-ito")
+    if e == "random-ito":
+        import random
+        return random.choice([k for k, _g, _w in ITO_EFFECTS])
+    if e == "random-all":
+        import random
+        return random.choice(all_effects() or [k for k, _g, _w in ITO_EFFECTS])
+    return e if e in all_effects() else "smoke"
+
+
+def fps():
+    """T3: ttfx frame rate, 30..120; unset = 120 (as it always was) until the user picks."""
+    try:
+        v = int(COL.style().get("screensaverFps") or 120)
+    except (TypeError, ValueError):
+        v = 120
+    return max(30, min(120, v))
+
+
+def ttfx_argv(effect, text_file=None):
+    return (["ttfx", "-i", str(text_file or BRANDING), "--frame-rate", str(fps()), "--canvas-width", "0", "--canvas-height", "0", "--reuse-canvas",
+             "--anchor-canvas", "c", "--anchor-text", "c", "--no-eol", "--no-restore-cursor",
+             "--terminal-background-color", ground(), effect] + colour_flags(effect))
+
+
+# T5: ttfx effects that leave a double-width field wrong at the end (bench-ttfx.py wide, 2026-10-09, ttfx 0.x): the fog set is
+# CJK, so it never runs these. Bench: vhstape final frame differs from the input with 霧町声, equal with ASCII.
+WIDE_UNSAFE = ("vhstape",)
+
+
+def pick_effect_for(name):
+    e = pick_effect()
+    if name == "fog" and e in WIDE_UNSAFE:
+        import random
+        pool = [k for k, _g, _w in ITO_EFFECTS if k not in WIDE_UNSAFE]
+        return random.choice(pool)
+    return e
+
+
+def cmd_effects():
+    out({"ok": True, "ito": [{"key": k, "kanji": g, "name": k, "why": w} for k, g, w in ITO_EFFECTS],
+         "all": all_effects(), "current": str(COL.style().get("screensaverEffect") or "random-ito")})
+
+
+def cmd_run(args):
+    """The screensaver loop (a port of omarchy-screensaver): hide the cursor, paint the ground, play effects one after another,
+    leave on a key or when the window loses focus. Only the ttfx child it started is ever killed."""
+    if "--dry-run" in args:
+        cols, rows = screen_size()
+        if "--size" in args and args.index("--size") + 1 < len(args):
+            m = re.fullmatch(r"(\d+)x(\d+)", args[args.index("--size") + 1])
+            if m:
+                cols, rows = int(m.group(1)), int(m.group(2))
+        f, note = screen_text_file(cols, rows)
+        out({"ok": True, "argv": ttfx_argv(pick_effect_for(text_set()), f), "ground": ground(), "size": [cols, rows], "text": str(f),
+             "art": list(art_size(text_set(), cols, rows)) if text_set() in ("spiral", "eye", "fog") else None, "fps": fps(),
+             "palette": palette(), "class": CLASS, **({"note": note} if note else {})})
+    import select, signal, termios, tty
+    effect_off = lambda: subprocess.run(["hyprctl", "eval", "hl.config({ cursor = { invisible = false } })"], capture_output=True) \
+        if subprocess.run(["which", "hyprctl"], capture_output=True).returncode == 0 else None
+    state = {"child": None}
+
+    def leave(*_a):
+        if state["child"] and state["child"].poll() is None:
+            state["child"].terminate()
+        effect_off()
+        subprocess.run(["pkill", "-f", "[" + CLASS[0] + "]" + CLASS[1:]], capture_output=True)
+        sys.exit(0)
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT):
+        signal.signal(sig, leave)
+    g = ground().lstrip("#")
+    sys.stdout.write("\033]11;rgb:%s/%s/%s\007" % (g[0:2], g[2:4], g[4:6]))
+    sys.stdout.flush()
+    subprocess.run(["hyprctl", "eval", "hl.config({ cursor = { invisible = true } })"], capture_output=True)
+    deadline = time.time() + 2
+    def grid():
+        try:
+            return tuple(os.get_terminal_size(1))
+        except OSError:
+            return (0, 0)
+    while time.time() < deadline and grid() == (80, 24):          # the window has not been sized yet
+        time.sleep(0.02)
+
+    def focused():
+        try:
+            r = subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, timeout=3)
+            return json.loads(r.stdout).get("class") == CLASS
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return True
+    # This script is fed to python on stdin (a heredoc), so stdin is not the terminal: keys are read from /dev/tty.
+    try:
+        tfd = os.open("/dev/tty", os.O_RDONLY)
+        old = termios.tcgetattr(tfd)
+        tty.setcbreak(tfd)
+    except (OSError, termios.error):
+        tfd, old = None, None
+    try:
+        while True:
+            cols, rows = screen_size()
+            text_file, _note = screen_text_file(cols, rows)
+            state["child"] = subprocess.Popen(ttfx_argv(pick_effect_for(text_set()), text_file))
+            while state["child"].poll() is None:
+                r, _w, _x = select.select([tfd], [], [], 1) if old else ([], [], [])
+                if r or not focused():
+                    leave()
+                if not old:
+                    time.sleep(1)
+    finally:
+        if old:
+            termios.tcsetattr(tfd, termios.TCSADRAIN, old)
+            os.close(tfd)
+
+
+def cmd_launch(args):
+    if not LAUNCHER.is_file():
+        fail(f"{LAUNCHER} is missing; deploy the suite")
+    os.execv(str(LAUNCHER), [str(LAUNCHER)] + args)
+
+
+def cmd_start():
+    # Checked here too, not only inside the launcher: the gate must hold even if that script's own check ever changes
+    # shape, and it lets us report *why* nothing started instead of just an exit code.
+    if TOGGLE_OFF.exists():
+        out({"ok": True, "started": False, "reason": "screensaver-off is set"})
+    if str(COL.style().get("screensaverEffect") or "random-ito") == "random-all" or not LAUNCHER.is_file():
+        proc = subprocess.run(["omarchy-launch-screensaver"], capture_output=True, text=True)    # Omarchy's own, untouched
+    else:
+        proc = subprocess.run([str(LAUNCHER)], capture_output=True, text=True)
+    out({"ok": True, "started": proc.returncode == 0})
+
+
+def cmd_stop():
+    subprocess.run(["pkill", "-f", CLASS], check=False)
+    out({"ok": True, "stopped": True})
+
+
+def theme_colors_path(name):
+    for base in (HOME / ".config" / "omarchy" / "themes", Path("/usr/share/omarchy/themes")):
+        if (base / name / "colors.toml").is_file():
+            return base / name / "colors.toml"
+    fail(f"no theme named {name!r}")
+
+
+def preview_one(name, cols, rows, pal):
+    """A still of the art on the ground colour at a cols x rows screen, with the final gradient the palette gives (vertical), in the
+    theme font. The effect plays live; this is the rest state. Returns (PIL image, info)."""
+    from PIL import Image, ImageDraw, ImageFont
+    text, _n = text_sized(name, cols, rows)
+    c, _ = COL.resolve()
+    cw, ch, PX = 3.6, 8.3, 6
+    W, H = int(cols * cw), int(rows * ch)
+    def font(pattern):
+        f = subprocess.run(["fc-match", "-f", "%{file}", pattern], capture_output=True, text=True).stdout.strip()
+        return ImageFont.truetype(f, PX) if f else ImageFont.load_default()
+    try:
+        fam = subprocess.run(["omarchy-font-current"], capture_output=True, text=True, timeout=5).stdout.strip() or "monospace"
+    except (OSError, subprocess.SubprocessError):
+        fam = "monospace"
+    mono, cjk = font(fam), font("Noto Serif CJK JP")
+    img = Image.new("RGB", (W, H), ground())
+    d = ImageDraw.Draw(img)
+    lines = text.rstrip("\n").splitlines()
+    top = tuple(int(c["bone"][i:i + 2], 16) for i in (1, 3, 5))
+    bot = tuple(int(v, 16) for v in (lambda m: (m[0:2], m[2:4], m[4:6]))(mix(c["bone"], c["blood"], 0.30))) if pal == "restrained" \
+        else tuple(int(c["lit"][i:i + 2], 16) for i in (1, 3, 5))
+    width = max((sum(2 if ord(x) >= 0x2E80 else 1 for x in l) for l in lines), default=0)
+    x0, y0 = (cols - width) // 2, (rows - len(lines)) // 2
+    for ri, l in enumerate(lines):
+        t = ri / max(1, len(lines) - 1)
+        col = tuple(int(top[k] + (bot[k] - top[k]) * t) for k in range(3))
+        x = x0
+        for x_ch in l:
+            wide_ = ord(x_ch) >= 0x2E80
+            if x_ch != " ":
+                d.text((x * cw, (y0 + ri) * ch), x_ch, font=cjk if wide_ else mono, fill=col)
+            x += 2 if wide_ else 1
+    return img, {"art": [width, len(lines)], "cells": [cols, rows], "margins": {"L": x0, "R": cols - x0 - width, "T": y0, "B": rows - y0 - len(lines)}}
+
+
+def cmd_preview_image(args):
+    """preview-image [SET] [--themes a,b,c,d] [--palette restrained|classic] [--grid COLSxROWS]: stills of the art at that screen size
+    (default 365 x 87, the 2560 x 1440 screen) in each theme's colours, and a 2 x 2 sheet when there are several themes."""
+    from PIL import Image
+    opts, names, i = {}, [], 0
+    while i < len(args):
+        if args[i] in ("--themes", "--palette", "--grid") and i + 1 < len(args):
+            opts[args[i]] = args[i + 1]
+            i += 2
+        else:
+            if not args[i].startswith("-"):
+                names.append(args[i])
+            i += 1
+    name = names[0] if names and names[0] in TEXT_SETS else text_set()
+    m = re.fullmatch(r"(\d+)x(\d+)", opts.get("--grid", "365x87"))
+    cols, rows = (int(m.group(1)), int(m.group(2))) if m else (365, 87)
+    pal = opts.get("--palette") or palette()
+    if pal not in ("classic", "restrained"):
+        fail("palette is classic or restrained")
+    themes = [t for t in opts.get("--themes", "").split(",") if t] or [None]
+    CACHE.mkdir(parents=True, exist_ok=True)
+    items, imgs = [], []
+    for theme in themes:
+        if theme:
+            COL.THEME_COLORS = theme_colors_path(theme)
+        img, info = preview_one(name, cols, rows, pal)
+        c, _ = COL.resolve()
+        p = CACHE / f"preview-{name}-{theme or 'current'}-{pal}-{cols}x{rows}-{sha12(json.dumps(c) + ground() + str(info))}.png"
+        img.save(p)
+        imgs.append(img)
+        items.append({"theme": theme or "current", "path": str(p), "size": list(img.size), **info})
+    reply = {"ok": True, "set": name, "palette": pal, "items": items, "path": items[0]["path"], "size": items[0]["size"]}
+    if len(imgs) > 1:
+        w, h = imgs[0].size
+        sheet = Image.new("RGB", (2 * w, ((len(imgs) + 1) // 2) * h), (0, 0, 0))
+        for k, im in enumerate(imgs):
+            sheet.paste(im, ((k % 2) * w, (k // 2) * h))
+        sp = CACHE / f"preview-sheet-{name}-{pal}-{cols}x{rows}.png"
+        sheet.save(sp)
+        reply["sheet"] = str(sp)
+    out(reply)
+
+
+def cmd_custom():
+    """Make ~/.config/ito/screensaver-custom.txt (from the spiral) when it is missing; print its path (for the editor pill)."""
+    if not CUSTOM_TEXT.is_file():
+        write_atomic(CUSTOM_TEXT, ART.spiral_text())
+    out({"ok": True, "path": str(CUSTOM_TEXT)})
+
+
+def cmd_use_omarchy_timer():
+    cmd_remove_idle()
+
+
+SHELL_JSON = HOME / ".config" / "omarchy" / "shell.json"
+APPLIED = BK / "screensaver.txt.applied"   # sha12 of the text apply-text last wrote (the text itself has no header)
+
+
+def sha12(text):
+    import hashlib
+    return hashlib.sha1((text or "").encode()).hexdigest()[:12]
+
+
+def omarchy_timer():
+    try:
+        idle = json.loads(SHELL_JSON.read_text()).get("idle")
+        return int(idle.get("screensaver")) if isinstance(idle, dict) and idle.get("screensaver") is not None else None
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def cmd_status():
+    """v2 (boot-lock-v2 §2.2). Writes nothing."""
+    idle_text = read(HYPRIDLE) or ""
+    text = read(BRANDING)
+    wanted, tnote = text_for()
+    applied_sha = (read(APPLIED) or "").strip() or None
+    legacy = text is not None and bool(NAME_RE.search(text))      # the old wall of the project's name, applied by an earlier version
+    ours = text is not None and (sha12(text) == applied_sha or text == wanted or legacy)
+    ito_listener = MARK_BEGIN in idle_text
+    omarchy = omarchy_timer()
+    schedulers = (["omarchy"] if omarchy is not None else []) + (["hypridle"] if ito_listener else [])
+    issues, state = [], "off"
+    if ito_listener and omarchy is not None:
+        issues.append({"code": "two_screensavers", "level": "warn",
+                       "text": f"Two screensavers: Omarchy's at {omarchy} s and the Ito listener at {IDLE_TIMEOUT} s."})
+    if ours:
+        if legacy and not issues:
+            state = "stale"
+            issues.append({"code": "legacy_text", "level": "warn", "text": "The screensaver still shows the old text; Update replaces it."})
+        elif issues:
+            state = "partial"
+        elif TOGGLE_OFF.exists():
+            state = "blocked"
+            issues.append({"code": "screensaver_off", "level": "warn", "text": "The screensaver is switched off in Omarchy."})
+        elif sha12(text) != sha12(wanted):
+            state = "stale"
+        else:
+            state = "on"
+    try:
+        at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(BRANDING.stat().st_mtime)) if ours else None
+    except OSError:
+        at = None
+    if tnote in ("custom_missing", "stock_missing"):
+        issues.append({"code": tnote, "level": "warn", "text": (
+            "The custom text file ~/.config/ito/screensaver-custom.txt is missing or empty, so the spiral is shown." if tnote == "custom_missing"
+            else "Omarchy's own logo.txt cannot be read, so the spiral is shown.")})
+    out({
+        "ok": True, "surface": "screensaver", "state": state, "engine": "+".join(schedulers) or "none",
+        "applied": {"text": text_set(), "at": at, "inputs": sha12(text)} if ours else None,
+        "text_set": text_set(), "fps": fps(), "palette": palette(), "class": CLASS, "effect": str(COL.style().get("screensaverEffect") or "random-ito"),
+        "timer_owner": "hypridle" if hyprlock_owns() and ito_listener else ("omarchy" if omarchy is not None else "none"),
+        "omarchy_timer": omarchy, "hyprlock_owns": hyprlock_owns(),
+        "current_inputs": sha12(wanted), "issues": issues,
+        "starts_after": min([t for t in (omarchy, IDLE_TIMEOUT if ito_listener else None) if t is not None], default=None),
+        "text_installed": (text or "") == wanted,
+        "idle_installed": ito_listener,
+        "idle_timeout": IDLE_TIMEOUT,
+        "screensaver_off": TOGGLE_OFF.exists(),
+    })
+
+
+args = sys.argv[1:]
+if not args or args[0] in ("-h", "--help", "help"):
+    print("usage: ito-screensaver apply|apply-text|revert|install-idle|remove-idle|start|stop|status|effects|run|launch|preview-image|use-omarchy-timer")
+    sys.exit(0 if args else 2)
+cmd = args[0]
+if cmd == "apply-text":
+    cmd_apply_text()
+elif cmd == "revert":
+    cmd_revert()
+elif cmd == "apply":
+    cmd_apply()
+elif cmd == "install-idle":
+    cmd_install_idle()
+elif cmd == "remove-idle":
+    cmd_remove_idle()
+elif cmd == "start":
+    cmd_start()
+elif cmd == "stop":
+    cmd_stop()
+elif cmd == "status":
+    cmd_status()
+elif cmd == "effects":
+    cmd_effects()
+elif cmd == "run":
+    cmd_run(args[1:])
+elif cmd == "launch":
+    cmd_launch(args[1:])
+elif cmd == "preview-image":
+    cmd_preview_image(args[1:])
+elif cmd == "custom":
+    cmd_custom()
+elif cmd == "use-omarchy-timer":
+    cmd_use_omarchy_timer()
+else:
+    fail(f"unknown command {cmd!r}; usage: ito-screensaver apply|apply-text|revert|install-idle|remove-idle|start|stop|status|effects|run|launch|preview-image|use-omarchy-timer")
+PY

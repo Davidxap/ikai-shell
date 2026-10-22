@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.date",
+  "name": "Ito Date",
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "davidxap",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Day and month as dim numerals, the counterweight to the clock.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Date",
+    "description": "Day and month as dim numerals, the counterweight to the clock.",
+    "category": "Time",
+    "allowMultiple": false
+  }
+}

@@ -1,0 +1,413 @@
+#!/usr/bin/env bash
+# ito-plymouth — the boot splash (Plymouth), composed from your theme and applied only through Omarchy's own tools.
+#
+# Plymouth can change only the logo picture, one flat background colour and one text colour (the progress bar, lock icon and
+# password box share it). Every design decision is therefore BAKED into the logo PNG. Applying needs sudo and rebuilds the initramfs,
+# so it is never automatic and always a terminal step: the password prompt must be visible to you.
+#
+# Usage: ito-plymouth compose [--composition X]  write ~/.cache/ito/plymouth/logo-<sha12>.png; print its path and what it was made from
+#        ito-plymouth preview          compose, then render Omarchy's own login-screen preview (no window is opened)
+#        ito-plymouth status           state (off | on | stale | blocked), what was applied and when, the inputs now
+#        ito-plymouth apply            TERMINAL ONLY: shows the exact command, asks, copies the logo to a plain file, runs
+#                                      omarchy-plymouth-set <ink> <text> <logo> (sudo); writes ~/.config/ito/plymouth-applied.json
+#        ito-plymouth reset            TERMINAL ONLY: asks, then runs omarchy-plymouth-reset (Omarchy's own boot screen back)
+# Keys (ito-style.json, through ito-config): bootSource slot|mark|theme, bootComposition eye-shut|<art>|card-<scene>|picture|seal|caption, bootCaption,
+# bootSize 160-480, bootFrame none|disc|ring, bootTone tint|duotone|raw, bootUi bone|accent. The background is always the theme's ink.
+# Every command prints one JSON line and exits 0, or prints {"error": ...} and exits 1.
+set -euo pipefail
+ITO_BIN_DIR="$(dirname "$(readlink -f "$0")")"
+export ITO_BIN_DIR
+
+python3 - "$@" <<'PY'
+import hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
+from pathlib import Path
+
+sys.path.insert(0, os.environ.get("ITO_BIN_DIR", "."))
+import ito_colours as COL
+import ito_art as ART
+import ito_ink as INK
+
+HOME = Path(os.environ.get("HOME", "~")).expanduser()
+MARKS = HOME / ".config" / "ito" / "marks"
+CACHE = HOME / ".cache" / "ito" / "plymouth"
+APPLIED = HOME / ".config" / "ito" / "plymouth-applied.json"
+OMARCHY_PATH = Path(os.environ.get("OMARCHY_PATH") or "/usr/share/omarchy")
+ART_DIR = HOME / ".config" / "omarchy" / "bar" / "modules" / "ito-art"
+MARK_CACHE = HOME / ".cache" / "ito" / "marks"
+THEME_DIR = HOME / ".local" / "state" / "omarchy" / "current" / "theme"
+GEN = 1
+# The art compositions are built from the user's own pictures under ~/.config/ito/assets (never from the repo): (folder, file) per key.
+# `eye-shut` is the legacy key: it means the Uzumaki eye when that art exists, the old drawn eye only when the folder has nothing.
+ASSETS = Path(os.environ.get("ITO_ASSETS_DIR") or HOME / ".config" / "ito" / "assets")
+ART_COMPOSITIONS = {"uzumaki-eye": "marks/uzumaki-eye", "beetle": "marks/beetle", "remina": "marks/remina", "tomie": "marks/tomie",
+                    "eye-veined": "eyes/veined/lid", "eye-spiral": "eyes/uzumaki/lid"}
+# The boot cards: the scenes of your Boot & Lock sheets (`ito-assets recipe sheets` writes cards/<scene>.png, no text in them), shown as
+# one large picture whose edges dissolve into the boot colour, CARD_H of the screen height (Plymouth draws the logo at its own pixel size).
+CARDS = {"card-tomie": "cards/tomie", "card-pyramid": "cards/pyramid", "card-road": "cards/road", "card-moth": "cards/moth"}
+CARD_H, CARD_W = 0.56, 0.80
+SOURCES, COMPOSITIONS = ("slot", "mark", "theme"), ("eye-shut", *ART_COMPOSITIONS, *CARDS, "picture", "seal", "caption")
+
+
+def art_file(key, light):
+    """The user's PNG for an art composition or a card (the .light twin on a light theme when it exists), or None."""
+    rel = ART_COMPOSITIONS.get(key) or CARDS.get(key)
+    if not rel:
+        return None
+    names = ([rel + ".light.png"] if light else []) + [rel + ".png"]
+    return next((ASSETS / n for n in names if (ASSETS / n).is_file() and (ASSETS / n).stat().st_size > 0), None)
+
+
+def out(obj, code=0):
+    print(json.dumps(obj))
+    sys.exit(code)
+
+
+def fail(message):
+    out({"error": message}, 1)
+
+
+def opt(key, allowed, default):
+    v = str(COL.style().get(key) or default)
+    return v if v in allowed else default
+
+
+def arg_value(name):
+    a = sys.argv
+    return a[a.index(name) + 1] if name in a and a.index(name) + 1 < len(a) else None
+
+
+def screen():
+    """(w, h) of the smallest connected screen (the boot picture must fit every one), ITO_BOOT_SCREEN=WxH to override, else 1920x1080."""
+    m = re.fullmatch(r"(\d{3,5})x(\d{3,5})", os.environ.get("ITO_BOOT_SCREEN", ""))
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    try:
+        mons = json.loads(subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True, timeout=3).stdout)
+        return min(((int(x["width"]), int(x["height"])) for x in mons), key=lambda wh: wh[1])
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return 1920, 1080
+
+
+def opts():
+    try:
+        size = max(160, min(480, int(COL.style().get("bootSize") or 320)))
+    except (TypeError, ValueError):
+        size = 320
+    cap = re.sub(r"[^a-z0-9 .,'·:!?-]", "", str(COL.style().get("bootCaption") or "").lower())[:32]
+    o = {"source": opt("bootSource", SOURCES, "slot"), "composition": arg_value("--composition") if (sys.argv[1:2] == ["compose"] and arg_value("--composition") in COMPOSITIONS) else opt("bootComposition", COMPOSITIONS, "eye-shut"),
+         "size": size, "frame": opt("bootFrame", ("none", "disc", "ring"), "ring"),
+         "tone": opt("bootTone", ("tint", "duotone", "raw"), "tint"), "ui": opt("bootUi", ("bone", "accent"), "bone"),
+         "caption": cap or (os.uname().nodename.lower()[:32])}
+    if o["composition"] in CARDS:
+        o["screen"] = list(screen())
+        f = art_file(o["composition"], False)
+        o["art"] = [f.stat().st_size, f.stat().st_mtime_ns] if f else None     # a re-made picture is a new logo, not a stale cache hit
+    return o
+
+
+def slot_png():
+    """The _plymouth slot as a PNG path, or fail: empty, a symlink, and a non-image are all refused (privilege safety)."""
+    f = MARKS / "_plymouth.png"
+    if not (f.exists() or f.is_symlink()):
+        for ext in (".jpg", ".jpeg", ".webp"):
+            g = MARKS / ("_plymouth" + ext)
+            if g.exists() or g.is_symlink():
+                f = g
+                break
+    if f.is_symlink():
+        fail("slot _plymouth is a symlink; choose the picture again (ito-marks pick --as _plymouth)")
+    if not f.is_file() or f.stat().st_size == 0:
+        fail("slot _plymouth is empty: choose a picture first (ito-marks pick --as _plymouth)")
+    try:
+        from PIL import Image
+        with Image.open(f) as im:
+            im.verify()
+    except Exception:
+        fail("slot _plymouth is not a valid image; choose another one")
+    return f
+
+
+def mark_png():
+    name = str(COL.style().get("menuMark") or "").strip()
+    bare = name.replace("custom:", "", 1)
+    if not bare or "/" in bare:
+        fail("no menu mark is set; choose bootSource slot or theme")
+    cands = [MARK_CACHE / f"{bare}.png", MARKS / f"{bare}.png"]
+    for pat in (f"menu-{bare}.png", f"{bare}.png"):
+        cands += sorted(ART_DIR.rglob(pat))
+    f = next((c for c in cands if c.is_file() and c.stat().st_size > 0), None)
+    if f is None:
+        fail(f"the mark {bare!r} has no picture on disk")
+    return f
+
+
+def theme_logo():
+    for n in ("plymouth/logo.png", "unlock.png", "logo.png"):
+        if (THEME_DIR / n).is_file():
+            return THEME_DIR / n
+    fail("the current theme has no logo.png; choose another bootSource")
+
+
+def tint(im, colours):
+    """Repaint like the lock's mark: reddish pixels blood, the rest bone."""
+    blood = tuple(int(v) for v in INK.rgb(colours["lit"] if "lit" in colours else colours["blood"]))
+    bone = tuple(int(v) for v in INK.rgb(colours["bone"]))
+    px = im.load()
+    for y in range(im.height):
+        for x in range(im.width):
+            r, g, b, a = px[x, y]
+            if a == 0:
+                continue
+            w = max(0.0, min(1.0, (r - max(g, b)) / 120))
+            lum = min(1.0, max(r, g, b) / 225)
+            px[x, y] = tuple(min(255, round((blood[c] * w + bone[c] * (1 - w)) * lum)) for c in range(3)) + (a,)
+    return im
+
+
+def duotone(im, colours):
+    """Paper in bone, ink transparent (the boot background shows through the drawing's darks)."""
+    from PIL import Image, ImageOps
+    g = ImageOps.autocontrast(im.convert("L"), cutoff=1)
+    bone = tuple(int(v) for v in INK.rgb(colours["bone"]))
+    solid = Image.new("RGBA", im.size, bone + (255,))
+    solid.putalpha(g)
+    return solid
+
+
+def card_tone(im, colours, tone):
+    """A card (ito_sheets' reference palette + alpha) onto the theme: tint keeps its darks dark (tone onto the darker..lighter of ink and
+    bone, blood onto the accent), so a light theme gets a dark print on paper, never a negative; duotone and raw as for the art."""
+    import numpy as np
+    import ito_sheets as SH
+    from PIL import Image
+    if tone == "raw":
+        return im
+    alpha = im.getchannel("A")
+    if tone == "duotone":
+        out = duotone(im, colours)
+        from PIL import ImageChops
+        out.putalpha(ImageChops.multiply(out.getchannel("A"), alpha))
+        return out
+    a = np.asarray(im.convert("RGB"), np.float32) - SH.INK_REF
+    basis = np.stack([SH.BONE_REF - SH.INK_REF, SH.BLOOD_REF - SH.INK_REF], axis=1)
+    ub = np.clip(a.reshape(-1, 3) @ np.linalg.pinv(basis).T, 0.0, 1.0)
+    g = min(0.12, float(np.percentile(ub[:, 0], 35)))            # the scene's fog ground sits on the boot colour itself: no slab
+    ub[:, 0] = np.clip((ub[:, 0] - g) / (1 - g), 0.0, 1.0)
+    ink, bone, blood = (np.asarray(INK.rgb(colours[n]), np.float32) for n in ("ink", "bone", "blood"))
+    lo, hi = (ink, bone) if ink.sum() <= bone.sum() else (bone, ink)
+    rgb = lo + ub[:, :1] * (hi - lo) + ub[:, 1:] * (blood - lo)
+    out = Image.fromarray(np.clip(rgb + 0.5, 0, 255).astype(np.uint8).reshape(im.height, im.width, 3), "RGB").convert("RGBA")
+    out.putalpha(alpha)
+    return out
+
+
+def compose_image(o, colours):
+    from PIL import Image, ImageDraw, ImageFont
+    S = o["size"]
+    comp = o["composition"]
+    light = sum(int(v) for v in INK.rgb(colours["ink"])) / 3 > 140
+    if comp == "eye-shut" and art_file("uzumaki-eye", light):
+        comp = "uzumaki-eye"
+    if (comp in ART_COMPOSITIONS or comp in CARDS) and art_file(comp, light) is None:
+        comp = "eye-shut"          # no art of yours on disk: the drawn eye keeps the screen from being empty
+    if comp == "eye-shut":
+        im = ART.eye_shut(S, colours)
+    elif comp in CARDS:
+        im = Image.open(art_file(comp, light)).convert("RGBA")
+        sw, sh = o["screen"]
+        s = min(sh * CARD_H / im.height, sw * CARD_W / im.width, 1.0)
+        im = card_tone(im.resize((max(1, round(im.width * s)), max(1, round(im.height * s))), Image.LANCZOS), colours, o["tone"])
+    elif comp in ART_COMPOSITIONS:
+        im = Image.open(art_file(comp, light)).convert("RGBA")
+        box = im.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
+        if box:
+            im = im.crop(box)
+        wide = im.width / im.height > 1.6
+        s = (S * 1.4 if wide else S) / max(im.size)
+        im = im.resize((max(1, round(im.width * s)), max(1, round(im.height * s))), Image.LANCZOS)
+        if o["tone"] == "tint":
+            im = tint(im, colours)
+        elif o["tone"] == "duotone":
+            im = duotone(im, colours)
+    else:
+        src = {"slot": slot_png, "mark": mark_png, "theme": theme_logo}[o["source"]]()
+        im = Image.open(src).convert("RGBA")
+        s = S / max(im.size)
+        im = im.resize((max(1, round(im.width * s)), max(1, round(im.height * s))), Image.LANCZOS)
+        if o["tone"] == "tint":
+            im = tint(im, colours)
+        elif o["tone"] == "duotone":
+            im = duotone(im, colours)
+        if o["frame"] in ("disc", "ring"):
+            m = Image.new("L", im.size, 0)
+            ImageDraw.Draw(m).ellipse([0, 0, im.width - 1, im.height - 1], fill=255)
+            from PIL import ImageChops
+            im.putalpha(ImageChops.multiply(im.split()[-1], m))
+            if o["frame"] == "ring":
+                big = Image.new("RGBA", im.size, (0, 0, 0, 0))
+                ImageDraw.Draw(big).ellipse([1, 1, im.width - 2, im.height - 2], outline=tuple(int(v) for v in INK.rgb(colours["blood"])) + (255,), width=max(2, S // 160))
+                im = Image.alpha_composite(im, big)
+    if o["composition"] in ("seal", "caption"):
+        def fam(p):
+            f = subprocess.run(["fc-match", "-f", "%{file}", p], capture_output=True, text=True).stdout.strip()
+            return f
+        W, H = im.size
+        if o["composition"] == "caption":
+            fnt = ImageFont.truetype(fam("JetBrains Mono Light") or fam("monospace"), max(12, S // 16))
+            canvas = Image.new("RGBA", (max(W, int(fnt.getlength(o["caption"]) + 8)), H + 24 + max(14, S // 14)), (0, 0, 0, 0))
+            canvas.alpha_composite(im, ((canvas.width - W) // 2, 0))
+            d = ImageDraw.Draw(canvas)
+            bone = tuple(int(v) for v in INK.rgb(colours["bone"]))
+            d.text((canvas.width / 2, H + 24), o["caption"], font=fnt, fill=bone + (184,), anchor="mt")
+            im = canvas
+        else:
+            glyphs = [c for c in "静丘" if not c.isspace()]
+            fnt = ImageFont.truetype(fam("Noto Serif CJK JP"), max(24, S // 8))
+            canvas = Image.new("RGBA", (W + 28 + int(fnt.size * 1.1), H), (0, 0, 0, 0))
+            canvas.alpha_composite(im, (0, 0))
+            d = ImageDraw.Draw(canvas)
+            lit = tuple(int(v) for v in INK.rgb(colours["lit"]))
+            for i, ch in enumerate(glyphs):
+                d.text((W + 28, H / 2 + (i - (len(glyphs) - 1) / 2) * fnt.size * 1.15), ch, font=fnt, fill=lit + (153,), anchor="lm")
+            im = canvas
+    return im
+
+
+def current():
+    colours, _ = COL.resolve()
+    o = opts()
+    ui = colours["blood"] if o["ui"] == "accent" else colours["bone"]
+    key = hashlib.sha1(json.dumps([o, colours, GEN], sort_keys=True).encode()).hexdigest()[:12]
+    return colours, o, colours["ink"], ui, key
+
+
+def cmd_compose():
+    colours, o, bg, ui, key = current()
+    CACHE.mkdir(parents=True, exist_ok=True)
+    f = CACHE / f"logo-{key}.png"
+    if not f.is_file():
+        tmp = f.with_name(f".{f.name}.{os.getpid()}.png")
+        compose_image(o, colours).save(tmp)
+        os.replace(tmp, f)
+    for old in CACHE.glob("logo-*.png"):
+        if old != f and old.stat().st_mtime < time.time() - 3600:
+            old.unlink(missing_ok=True)
+    sha = hashlib.sha1(f.read_bytes()).hexdigest()[:12]
+    missing = o["composition"] in CARDS and art_file(o["composition"], False) is None      # drawn as the shut eye instead
+    return {"ok": True, "path": str(f), "background": bg, "text": ui, "inputs": key, "logo_sha": sha, "options": o, "missing_art": missing}
+
+
+def cmd_preview():
+    r = cmd_compose()
+    png = CACHE / f"preview-{r['inputs']}.png"
+    # Omarchy's preview ends by opening a full-screen viewer (imv); a shim for that one command keeps it from opening a window.
+    shim = Path(tempfile.mkdtemp(prefix="ito-plymouth-shim."))
+    (shim / "imv").write_text("#!/bin/sh\nexit 0\n")
+    (shim / "imv").chmod(0o755)
+    env = {**os.environ, "OMARCHY_PATH": str(OMARCHY_PATH), "PATH": f"{shim}:{os.environ.get('PATH', '')}"}
+    try:
+        p = subprocess.run([str(OMARCHY_PATH / "bin" / "omarchy-plymouth-preview"), r["background"], r["text"], r["path"], str(png)],
+                           capture_output=True, text=True, env=env, timeout=60)
+    finally:
+        shutil.rmtree(shim, ignore_errors=True)
+    if p.returncode != 0 or not png.is_file():
+        fail("Omarchy's preview failed: " + (p.stderr.strip().splitlines() or ["no output"])[-1])
+    out({"ok": True, "path": str(png), "logo": r["path"], "inputs": r["inputs"]})
+
+
+def applied():
+    try:
+        return json.loads(APPLIED.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def cmd_status():
+    try:
+        colours, o, bg, ui, key = current()
+        err = None
+    except SystemExit:
+        raise
+    a = applied()
+    issues, state = [], "blocked"
+    try:
+        r = cmd_compose_quiet(o, colours, bg, ui, key)
+    except SystemExit:
+        r = None
+    sha = r["logo_sha"] if r else None
+    if a:
+        state = "on" if (a.get("bg") == bg and a.get("text") == ui and a.get("logo_sha") == sha) else "stale"
+    else:
+        issues.append({"code": "never_applied", "level": "warn", "text": "Never applied from here: Omarchy's own boot screen is in place."})
+    out({"ok": True, "surface": "boot", "state": state, "engine": "plymouth",
+         "applied": {"at": a.get("at"), "inputs": a.get("inputs")} if a else None, "current_inputs": key, "issues": issues,
+         "options": o, "background": bg, "text": ui})
+
+
+def cmd_compose_quiet(o, colours, bg, ui, key):
+    f = CACHE / f"logo-{key}.png"
+    if not f.is_file():
+        CACHE.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_name(f".{f.name}.{os.getpid()}.png")
+        compose_image(o, colours).save(tmp)
+        os.replace(tmp, f)
+    return {"logo_sha": hashlib.sha1(f.read_bytes()).hexdigest()[:12], "path": str(f)}
+
+
+def need_tty():
+    try:
+        return open("/dev/tty", "r"), open("/dev/tty", "w")
+    except OSError:
+        return None
+
+
+def ask(tin, tout, text):
+    tout.write(text + " [y/N] ")
+    tout.flush()
+    return tin.readline().strip().lower() in ("y", "yes")
+
+
+def cmd_apply():
+    tty = need_tty()
+    if tty is None:
+        fail("apply is a terminal step (it needs your password and rebuilds the boot image): run `ito-plymouth apply` in a terminal. Nothing was changed and sudo was not called")
+    tin, tout = tty
+    r = cmd_compose()                                   # refuses an empty or symlinked slot before anything else
+    logo = Path(r["path"])
+    if logo.is_symlink() or not logo.is_file():
+        fail("the composed logo is not a regular file")
+    cmd = ["omarchy-plymouth-set", r["background"], r["text"], str(logo)]
+    tout.write("This will run (sudo, rebuilds the boot image, also changes the SDDM login logo):\n  " + " ".join(cmd) + "\n")
+    if not ask(tin, tout, "Continue?"):
+        fail("cancelled; nothing was changed")
+    p = subprocess.run([str(OMARCHY_PATH / "bin" / cmd[0])] + cmd[1:], env={**os.environ, "OMARCHY_PATH": str(OMARCHY_PATH)})
+    if p.returncode != 0:
+        fail(f"omarchy-plymouth-set failed (exit {p.returncode}); the boot screen was not recorded as applied")
+    APPLIED.parent.mkdir(parents=True, exist_ok=True)
+    APPLIED.write_text(json.dumps({"bg": r["background"], "text": r["text"], "logo_sha": r["logo_sha"], "inputs": r["inputs"],
+                                   "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, indent=1))
+    out({"ok": True, "applied": True, "next": "reboot to see it; `ito-plymouth reset` puts Omarchy's back"})
+
+
+def cmd_reset():
+    tty = need_tty()
+    if tty is None:
+        fail("reset is a terminal step: run `ito-plymouth reset` in a terminal. Nothing was changed and sudo was not called")
+    tin, tout = tty
+    tout.write("This runs omarchy-plymouth-reset (sudo): Omarchy's own boot screen and login logo come back.\n")
+    if not ask(tin, tout, "Continue?"):
+        fail("cancelled; nothing was changed")
+    p = subprocess.run([str(OMARCHY_PATH / "bin" / "omarchy-plymouth-reset")], env={**os.environ, "OMARCHY_PATH": str(OMARCHY_PATH)})
+    if p.returncode != 0:
+        fail(f"omarchy-plymouth-reset failed (exit {p.returncode})")
+    APPLIED.unlink(missing_ok=True)
+    out({"ok": True, "reset": True})
+
+
+args = sys.argv[1:]
+if not args or args[0] in ("-h", "--help", "help"):
+    print("usage: ito-plymouth compose|preview|status|apply|reset")
+    sys.exit(0 if args else 2)
+{"compose": lambda: out(cmd_compose()), "preview": cmd_preview, "status": cmd_status, "apply": cmd_apply, "reset": cmd_reset}.get(
+    args[0], lambda: fail(f"unknown command {args[0]!r}; usage: ito-plymouth compose|preview|status|apply|reset"))()
+PY

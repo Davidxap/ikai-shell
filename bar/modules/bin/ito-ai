@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""ito-ai — what the AI models have actually consumed, from whichever source is freshest.
+
+There is more than one writer of this data on a machine and they do not agree:
+
+  ~/.cache/<provider>-usage.json                     written by the user's own timers (claude-usage,
+                                                     codex-usage, opencode-usage). Authoritative and
+                                                     refreshed every few minutes.
+  ~/.local/state/omarchy/agents/usage/<id>.json      written by Omarchy's own agents widget, and only
+                                                     while that widget is loaded. With our bar it is
+                                                     never loaded, so it goes stale within the hour and
+                                                     keeps reporting the last percentage it ever saw.
+
+Reading the second one is how the widget came to show a five-hour window at 100% while the real one was
+at 0%. So this reads both, per provider, and keeps whichever was written last - and says how old it is,
+so a stale number can be shown as stale instead of as fact.
+
+    ito-ai              print one JSON object describing every provider
+    ito-ai --refresh    ask the user's own timers to run now, then print
+"""
+
+import json
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+HOME = Path.home()
+CACHE = HOME / ".cache"
+STATE = HOME / ".local" / "state" / "omarchy" / "agents" / "usage"
+
+# provider id -> (display name, cache file, state file, systemd service)
+PROVIDERS = [
+    ("claude", "Claude Code", CACHE / "claude-usage.json", STATE / "claude.json", "claude-usage.service"),
+    ("codex", "Codex", CACHE / "codex-usage.json", STATE / "codex.json", "codex-usage.service"),
+    ("opencode", "OpenCode", CACHE / "opencode-usage.json", None, "opencode-usage.service"),
+    ("fireworks", "Fireworks", CACHE / "fireworks-usage.json", STATE / "fireworks.json", None),
+]
+FRESH_MINUTES = 20
+
+
+def read(path):
+    try:
+        return json.loads(path.read_text()), path.stat().st_mtime
+    except (OSError, ValueError, AttributeError):
+        return None, 0
+
+
+def short(n):
+    """Token counts the way the caches label them: 29.9M, 140.6K."""
+    n = float(n or 0)
+    for unit, size in (("B", 1e9), ("M", 1e6), ("K", 1e3)):
+        if n >= size:
+            return f"{n / size:.1f}{unit}"
+    return str(int(n))
+
+
+def iso_minutes_left(value):
+    try:
+        when = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return max(0, int((when - datetime.now(timezone.utc)).total_seconds() // 60))
+    except (TypeError, ValueError):
+        return None
+
+
+def from_cache(data):
+    """The user's timer format: 5h/7d utilisation as strings, plus a model breakdown."""
+    limits = []
+    for key, label, reset in (("5h-utilization", "Session (5-hour)", "5h-reset"),
+                              ("7d-utilization", "Weekly (7-day)", "7d-reset")):
+        if key not in data:
+            continue
+        try:
+            pct = float(data[key])
+        except (TypeError, ValueError):
+            continue
+        stamp = int(data.get(reset) or 0)
+        minutes = max(0, int((stamp - time.time()) // 60)) if stamp else None
+        expired = bool(stamp) and stamp <= time.time()
+        # The reading is of a window that has since reset: what it said (often 100%) no longer holds, and the next
+        # reading will be of the new window. Show the reset, not the old number.
+        limits.append({"label": label, "pct": 0.0 if expired else pct, "minutes": None if expired else minutes,
+                       "expired": expired})
+    models = []
+    for m in data.get("_models") or []:
+        models.append({"name": m.get("name", ""), "tokens": m.get("totalWithCacheRead") or m.get("total") or 0,
+                       "label": m.get("totalWithCacheReadLabel") or m.get("totalLabel") or "",
+                       "today": m.get("todayLabel", ""), "sessions": m.get("sessions", 0),
+                       "pct": (m.get("pct") or 0) / 100.0})
+    today = data.get("_today_tokens") or 0
+    return {"limits": limits, "models": models, "todayTokens": today,
+            "todayLabel": short(today) if today else "",
+            "plan": data.get("_plan") or "", "source": data.get("_source", "cache")}
+
+
+def from_state(data):
+    """Omarchy's agents format: limits with a 0..1 percent, and a per-model token breakdown."""
+    limits = []
+    for lim in data.get("limits") or []:
+        try:
+            pct = float(lim.get("percent") or 0)
+        except (TypeError, ValueError):
+            continue
+        minutes = iso_minutes_left(lim.get("resetsAt"))
+        expired = lim.get("resetsAt") is not None and minutes == 0
+        limits.append({"label": str(lim.get("label", "")), "pct": 0.0 if expired else pct,
+                       "minutes": None if expired else minutes, "expired": expired})
+    models = []
+    for name, use in (data.get("modelUsage") or {}).items():
+        total = sum(int(use.get(k) or 0) for k in
+                    ("inputTokens", "outputTokens", "cacheCreationInputTokens", "cacheReadInputTokens"))
+        models.append({"name": name, "tokens": total, "label": short(total), "today": "", "sessions": 0, "pct": 0})
+    models.sort(key=lambda m: -m["tokens"])
+    today = data.get("todayTotalTokens") or 0
+    return {"limits": limits, "models": models, "todayTokens": today,
+            "todayLabel": short(today) if today else "",
+            "plan": data.get("tierLabel") or "", "source": "omarchy",
+            "prompts": data.get("todayPrompts") or 0, "sessions": data.get("todaySessions") or 0}
+
+
+def refresh():
+    """Run the users' own usage timers now, and return only once they have actually finished.
+
+    The first version started them with --no-block and slept a fixed 1.5s. The Claude one takes about 1.9s
+    (an OAuth call over the network), so 'Refresh' printed the OLD numbers and the fresh ones only showed
+    up at the next automatic poll, ninety seconds later -- which read as the widget not updating. These
+    are oneshot units, so a plain blocking start waits exactly as long as each needs; they run in
+    parallel and the whole thing is capped, so one slow or broken provider cannot hang the widget."""
+    procs = []
+    for _, _, _, _, service in PROVIDERS:
+        if service:
+            procs.append(subprocess.Popen(["systemctl", "--user", "start", service],
+                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+    deadline = time.time() + 12
+    for p in procs:
+        try:
+            p.wait(timeout=max(0.1, deadline - time.time()))
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+
+def main() -> int:
+    if "--refresh" in sys.argv:
+        refresh()
+
+    now = time.time()
+    out = []
+    for pid, name, cache_path, state_path, _ in PROVIDERS:
+        cache_data, cache_at = read(cache_path)
+        state_data, state_at = read(state_path) if state_path else (None, 0)
+        if not cache_data and not state_data:
+            continue
+        # Whichever writer went last wins: the caches are refreshed by a timer, the state file only
+        # while Omarchy's own widget is loaded, so it can be hours behind.
+        if cache_data and cache_at >= state_at:
+            info = from_cache(cache_data)
+            written = cache_at
+        else:
+            info = from_state(state_data)
+            written = state_at
+        age = int((now - written) // 60)
+        info.update({"id": pid, "name": name, "ageMinutes": age, "fresh": age <= FRESH_MINUTES,
+                     "stale": info.get("source") == "stale"})
+        info.setdefault("prompts", 0)
+        info.setdefault("sessions", 0)
+        if info["limits"] or info["models"] or info["todayTokens"]:
+            out.append(info)
+
+    # A window that has just reset means the reading behind it is old: ask that provider for a new one now (not
+    # waiting for it), so the next poll of the bar shows the new window instead of the timer's five-minute lag.
+    for p in out:
+        if any(l.get("expired") for l in p["limits"]):
+            unit = next((svc for pid, _, _, _, svc in PROVIDERS if pid == p["id"] and svc), None)
+            if unit:
+                subprocess.Popen(["systemctl", "--user", "start", "--no-block", unit],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Only a real quota counts towards the number on the bar. OpenCode's percentages are a local count of
+    # its own messages ("local messages"), not a limit anyone is against, and taking them into account
+    # pinned the bar at 100% while the actual Claude window was empty.
+    for p in out:
+        p["quota"] = p.get("source") in ("oauth", "omarchy", "stale")
+    live = [l["pct"] for p in out if p["fresh"] and p["quota"] for l in p["limits"]]
+    json.dump({"providers": out,
+               "pct": max(live) if live else -1,
+               "anyStale": any(not p["fresh"] for p in out),
+               "at": datetime.now().strftime("%H:%M")}, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

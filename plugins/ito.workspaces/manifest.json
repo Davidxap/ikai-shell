@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.workspaces",
+  "name": "Ito Workspaces",
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "davidxap",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Workspace art driven by state: bone when idle, blood when active.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "Ito Workspaces",
+    "description": "Workspace art driven by state: bone when idle, blood when active.",
+    "category": "Workspaces",
+    "allowMultiple": false
+  }
+}

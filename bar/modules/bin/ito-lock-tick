@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# ito-lock-tick — tiny helper for the lock screen's live labels. Pure bash, no forks on the hot path, no state files.
+#   ito-lock-tick glyph     one frame of a small spinning glyph (changes every 250 ms; kept for compatibility)
+#   ito-lock-tick line [i] [set]  a real quote that changes every 9 s (`i` sets it in italics); `ito` is accepted for compatibility
+#   ito-lock-tick status [S]  uptime, battery (when there is one) and how long the screen has been locked
+#   ito-lock-tick date [S]  the lowercase weekday and date, no forks
+# S is a letter-spacing in Pango units (1/1024 pt): the text is then wrapped in a <span letter_spacing="S">.
+# Called from hyprlock labels (cmd[update:...]); it never touches anything.
+# The lines come from their single source, the `text` of each QUOTES entry in ../ItoLore.js (only genuine, attributable lines; the
+# sources sit beside them there). Read with bash builtins only, and only for `line`.
+quotes() {
+  local f="${BASH_SOURCE[0]%/*}/../ItoLore.js" l in=0 re='text:[[:space:]]*"([^"]*)"'
+  lines=()
+  [[ -r $f ]] || return 0
+  while IFS= read -r l; do
+    if (( in )); then
+      [[ $l == "}"* ]] && break
+      [[ $l =~ $re ]] && lines+=("${BASH_REMATCH[1]}")
+    elif [[ $l == "var QUOTES = {"* ]]; then in=1; fi
+  done < "$f"
+}
+now=${EPOCHSECONDS:-$(printf '%(%s)T' -1)}
+arg2=${2:-}   # kept apart: the status mode reuses the positional parameters
+# Print $1, tracked when $2 is a number.
+tracked() {
+  if [[ ${2:-} =~ ^[0-9]+$ ]]; then printf '<span letter_spacing="%s">%s</span>' "$2" "$1"; else printf '%s' "$1"; fi
+}
+case "${1:-}" in
+  date)
+    printf -v d '%(%A · %-d %B)T' -1
+    tracked "${d,,}" "${2:-}"
+    ;;
+  glyph)
+    frames=(◜ ◠ ◝ ◞ ◡ ◟)
+    ms=${EPOCHREALTIME/./}; ms=${ms:0:${#ms}-3}
+    printf '%s' "${frames[(ms / 250) % ${#frames[@]}]}"
+    ;;
+  line)
+    quotes                                     # `ito` (the third word) is accepted for compatibility: the same lines
+    (( ${#lines[@]} )) || exit 0
+    l=${lines[(now / 9) % ${#lines[@]}]}
+    if [[ ${2:-} == i ]]; then printf '<i>%s</i>' "$l"; else printf '%s' "$l"; fi
+    ;;
+  status)
+    read -r up _ < /proc/uptime; up=${up%.*}
+    out="up $((up / 3600))h $((up % 3600 / 60))m"
+    for b in /sys/class/power_supply/BAT*/capacity; do
+      [[ -r $b ]] && { read -r cap < "$b"; out+=" · bat ${cap}%"; break; }
+    done
+    # Lock time: hyprlock is an ancestor of this process; its start time is field 22 of /proc/<pid>/stat.
+    pid=$$ locked=""
+    for _ in 1 2 3 4; do
+      read -r stat < "/proc/$pid/stat" 2>/dev/null || break
+      rest=${stat##*) }; comm=${stat#*(}; comm=${comm%%)*}
+      if [[ $comm == hyprlock ]]; then
+        set -- $rest; start=${20}
+        s=$((up - start / 100)); [[ $s -ge 0 ]] && locked=$(printf ' · locked %d:%02d' $((s / 60)) $((s % 60)))
+        break
+      fi
+      set -- $rest; pid=${2}
+    done
+    tracked "$out$locked" "$arg2"
+    ;;
+  *) echo "usage: ito-lock-tick glyph|line|status|date|frame" >&2; exit 2 ;;
+esac

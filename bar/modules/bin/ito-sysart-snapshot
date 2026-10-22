@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""ito-sysart-snapshot — one cached snapshot of everything the Boot & Lock page shows.
+
+  ito-sysart-snapshot refresh [--stamp S] [--surfaces lock,terminal,...] [--previews lock,...] [--force] [--bin DIR]
+      Prints the whole snapshot as one JSON line and writes it to ~/.cache/ito/sysart-snapshot.json.
+      A surface younger than 30 s (same stamp, previews present when asked) is reused, nothing is started for it.
+      The rest run in this one process, at most 3 helpers at a time, at low priority, previews only for the
+      surfaces named in --previews (the tabs that were shown). --force recomputes the named surfaces.
+  ito-sysart-snapshot invalidate      drop the file (after an apply)
+
+The helpers (ito-lock, ito-fastfetch, ito-screensaver, ito-plymouth, ito-marks) stay the single source of truth;
+this only runs them together and remembers the answers. Writes nothing but that one cache file.
+"""
+import json, os, subprocess, sys, time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+HOME = Path(os.environ.get("HOME", "~")).expanduser()
+CACHE = HOME / ".cache" / "ito" / "sysart-snapshot.json"
+TTL = 30.0
+ALL = ["lock", "terminal", "screensaver", "boot"]
+TEXT_SETS = ["spiral", "eye", "fog", "custom", "stock"]
+COMPOSITIONS = ["uzumaki-eye", "beetle", "remina", "tomie", "eye-veined", "eye-spiral", "card-tomie", "card-pyramid", "card-road", "card-moth",
+                "picture", "seal", "caption"]
+
+
+def arg(name, default=""):
+    a = sys.argv
+    return a[a.index(name) + 1] if name in a and a.index(name) + 1 < len(a) else default
+
+
+BIN = Path(arg("--bin") or os.environ.get("ITO_SNAPSHOT_BIN") or Path(__file__).resolve().parent)
+
+
+def run(tool, *args):
+    """Last JSON line of a helper's stdout, or None."""
+    try:
+        r = subprocess.run([str(BIN / tool), *args], capture_output=True, text=True, timeout=45,
+                           preexec_fn=lambda: os.nice(8))
+        lines = [l for l in r.stdout.splitlines() if l.startswith("{")]
+        return json.loads(lines[-1]) if lines else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def surface(name, layout, previews):
+    """The state of one surface; the independent helper calls of it run one after the other (the surfaces run in parallel)."""
+    o = {}
+    if name == "lock":
+        o["lockStatus"] = run("ito-lock", "status")
+        o["lockChain"] = run("ito-lock", "chain")
+        if previews: run("ito-lock", "preview", "--all")
+        d = run("ito-lock", "designs")
+        o["lockDesignList"] = d.get("designs", []) if d else []
+    elif name == "terminal":
+        o["fetchStatusObj"] = run("ito-fastfetch", "status")
+        if previews:
+            # one call previews every layout (about 1 s): the layout tiles take their own, the hero the chosen one
+            p = run("ito-fastfetch", "preview", "--all")
+            th = {i["layout"]: i["path"] for i in (p.get("items", []) if p else []) if i.get("path")}
+            o["fetchThumbs"] = th
+            o["fetchPreview"] = th.get(layout, "")
+            # the six fetch styles, each one the real preview of the chosen layout (the Terminal pane's style cards)
+            q = run("ito-fastfetch", "preview", "--styles", layout)
+            o["fetchStyleThumbs"] = {i["style"]: i["path"] for i in (q.get("items", []) if q else []) if i.get("style") and i.get("path")}
+    elif name == "screensaver":
+        o["screensaverStatusObj"] = run("ito-screensaver", "status")
+        o["effectsInfo"] = run("ito-screensaver", "effects")
+        if previews:
+            p = run("ito-screensaver", "preview-image")
+            o["saverPreview"] = p.get("path", "") if p else ""
+            # a smaller grid for the text tiles (the still is cropped to the tile anyway)
+            def thumb(name):
+                r = run("ito-screensaver", "preview-image", name, "--grid", "183x44")
+                return name, (r.get("path", "") if r else "")
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                o["saverThumbs"] = {k: v for k, v in ex.map(thumb, TEXT_SETS) if v}
+    else:
+        o["bootStatusObj"] = run("ito-plymouth", "status")
+        if previews:
+            p = run("ito-plymouth", "preview")
+            o["bootPreview"] = p.get("path", "") if p else ""
+            # the composed logo of each composition (cache-only, no Omarchy preview run): the tiles' thumbnails
+            def thumb(name):
+                r = run("ito-plymouth", "compose", "--composition", name)
+                return name, (r.get("path", "") if r and not r.get("missing_art") else "")     # a card without its picture has no tile
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                o["bootThumbs"] = {k: v for k, v in ex.map(thumb, COMPOSITIONS) if v}
+    o["previewed"] = bool(previews)
+    return o
+
+
+def load():
+    try:
+        d = json.loads(CACHE.read_text())
+        return d if d.get("v") == 1 else None
+    except (OSError, ValueError):
+        return None
+
+
+def save(d):
+    try:
+        CACHE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CACHE.with_name(CACHE.name + f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(d))
+        os.replace(tmp, CACHE)
+    except OSError:
+        pass
+
+
+def refresh():
+    stamp, force = arg("--stamp"), "--force" in sys.argv
+    want = [s for s in arg("--surfaces").split(",") if s in ALL] or ALL
+    prev = [s for s in arg("--previews").split(",") if s in ALL]
+    layout = arg("--layout") or "image"
+    snap = load() or {"v": 1, "surfaces": {}}
+    now = time.time()
+    todo = []
+    for s in want:
+        e = snap["surfaces"].get(s)
+        fresh = e and not force and snap.get("stamp") == stamp and now - e.get("at", 0) < TTL and (s not in prev or e.get("previewed"))
+        if not fresh: todo.append(s)
+    slots_fresh = snap.get("slots") and not force and now - snap.get("slots_at", 0) < TTL
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futs = {s: ex.submit(surface, s, layout, s in prev) for s in todo}
+        slots = None if slots_fresh else ex.submit(run, "ito-marks", "slots")
+        for s, f in futs.items():
+            e = f.result(); e["at"] = time.time(); snap["surfaces"][s] = e
+        if slots is not None:
+            r = slots.result()
+            if r is not None: snap["slots"], snap["slots_at"] = r, time.time()
+    snap["stamp"], snap["at"] = stamp, time.time()
+    if todo or slots_fresh is not True: save(snap)
+    print(json.dumps({**snap, "ran": todo}))
+
+
+c = sys.argv[1] if len(sys.argv) > 1 else ""
+if c == "refresh": refresh()
+elif c == "invalidate":
+    try: CACHE.unlink()
+    except OSError: pass
+    print(json.dumps({"ok": True}))
+else: print(__doc__)

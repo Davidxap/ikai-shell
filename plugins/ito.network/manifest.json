@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.network",
+  "name": "Ito Network",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author": "Omarchy (re-skinned by davidxap)",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Wi-Fi list and connection state",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Network",
+    "description": "Wi-Fi list and connection state",
+    "category": "Network",
+    "allowMultiple": false
+  }
+}

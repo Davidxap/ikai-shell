@@ -1,0 +1,141 @@
+{
+  "schema": 1,
+  "verifiedOn": "2026-10-21",
+  "versions": {
+    "omarchy": "4.0.6-1",
+    "quickshell": "0.3.2.r0.g4f508be-5",
+    "qt6-base": "6.12.0-3",
+    "hyprland": "0.56.2-4"
+  },
+  "verbatim": [
+    {
+      "id": "lock-service",
+      "label": "ito.lock Service.qml",
+      "source": "/usr/share/omarchy/shell/plugins/lock/Service.qml",
+      "hashFile": "plugins/ito.lock/service.sha256",
+      "fix": "Run scripts/sync-ito-lock.sh in the repository, review `git diff plugins/ito.lock`, deploy."
+    }
+  ],
+  "paths": [
+    "/usr/share/omarchy",
+    "/usr/share/omarchy/bin",
+    "/usr/share/omarchy/bin/omarchy-system-lock",
+    "/usr/share/omarchy/config/omarchy/shell.json",
+    "/usr/share/omarchy/default",
+    "/usr/share/omarchy/shell",
+    "/usr/share/omarchy/shell/plugins",
+    "/usr/share/omarchy/shell/plugins/lock/Service.qml",
+    "/usr/share/omarchy/shell/shell.qml",
+    "/usr/share/omarchy/themes",
+    "/usr/share/omarchy/version"
+  ],
+  "commands": [
+    "omarchy-audio-input-set-default",
+    "omarchy-audio-output-set-default",
+    "omarchy-audio-output-sink",
+    "omarchy-audio-sink-availability",
+    "omarchy-bar-boot-hotfix",
+    "omarchy-battery-status",
+    "omarchy-bluetooth-device",
+    "omarchy-bluetooth-power",
+    "omarchy-brightness-display",
+    "omarchy-brightness-keyboard",
+    "omarchy-capture-screenrecording",
+    "omarchy-cmd-missing",
+    "omarchy-default-terminal",
+    "omarchy-display-text-size",
+    "omarchy-dns",
+    "omarchy-font-current",
+    "omarchy-hyprland-monitor-focused",
+    "omarchy-hyprland-monitor-scaling",
+    "omarchy-hyprland-session-lock-stranded",
+    "omarchy-launch-about",
+    "omarchy-launch-editor",
+    "omarchy-launch-floating-terminal-with-presentation",
+    "omarchy-launch-or-focus-tui",
+    "omarchy-launch-screensaver",
+    "omarchy-launch-shell",
+    "omarchy-menu",
+    "omarchy-monitor-state",
+    "omarchy-network-band",
+    "omarchy-network-status",
+    "omarchy-notification-send",
+    "omarchy-plymouth-preview",
+    "omarchy-plymouth-reset",
+    "omarchy-plymouth-set",
+    "omarchy-powerprofiles-list",
+    "omarchy-powerprofiles-set",
+    "omarchy-restart-shell",
+    "omarchy-screensaver",
+    "omarchy-shell",
+    "omarchy-system-lock",
+    "omarchy-system-stats",
+    "omarchy-system-wake",
+    "omarchy-toggle-enabled",
+    "omarchy-toggle-idle",
+    "omarchy-toggle-nightlight",
+    "omarchy-toggle-notification-silencing",
+    "omarchy-version"
+  ],
+  "commons": {
+    "Color": [
+      "accent",
+      "background",
+      "bar",
+      "currentThemePath",
+      "foreground",
+      "lock",
+      "muted",
+      "tooltip",
+      "urgent"
+    ],
+    "Style": [
+      "bar",
+      "cornerRadius",
+      "font",
+      "gapsOut",
+      "hoverFillFor",
+      "normalFillFor",
+      "selectedFillFor",
+      "space",
+      "spaceReal",
+      "spacing"
+    ],
+    "Util": [
+      "alpha",
+      "canonicalWidgetId",
+      "execDetached",
+      "isPlainObject",
+      "normalizeLayout",
+      "shellQuote",
+      "wheelSteps"
+    ],
+    "Border": [
+      "controlSpec",
+      "flat"
+    ]
+  },
+  "ui": [
+    "BarIconButton",
+    "BorderSurface",
+    "Button",
+    "CursorSurface",
+    "KeyboardPanel",
+    "PanelActionButton",
+    "PanelKeyCatcher",
+    "PanelSectionHeader",
+    "PanelSeparator",
+    "PanelSlider",
+    "PanelToolTip",
+    "TextField",
+    "ToggleSwitch"
+  ],
+  "notCommands": [
+    "omarchy-lock",
+    "omarchy-lock-fingerprint",
+    "omarchy-lock-password",
+    "omarchy-lock-preview",
+    "omarchy-pragma",
+    "omarchy-sleep-lock"
+  ]
+}

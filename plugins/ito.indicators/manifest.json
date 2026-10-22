@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.indicators",
+  "name": "Ito Indicators",
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "davidxap",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Stay awake, night light and screen recording as icons you can click, each in several versions.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Indicators",
+    "description": "Stay awake, night light and screen recording as icons you can click, each in several versions.",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

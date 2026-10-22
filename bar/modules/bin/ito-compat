@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""ito-compat: detects upgrade drift between this shell and the Omarchy / Arch it runs on, in plain language.
+
+    ito-compat check     prints "ok", or an itemised list (what changed / is it safe / fix); exit 0 ok, 1 drift, 2 broken
+    ito-compat status    the versions we verified against and the ones installed now, and what is being watched
+    ito-compat json      the same as a JSON document (ito-health reads this)
+    ito-compat scan      (maintainers) print what our code reads from Omarchy, found by scanning the source tree
+    ito-compat record    (maintainers) write compat/verified.json from the installed versions and a fresh scan;
+                         run it through scripts/sync-compat.sh --record, which asks first. Never automatic.
+
+What is watched (all read-only):
+  versions   omarchy, quickshell, qt6-base, hyprland: installed vs the versions in compat/verified.json
+  verbatim   copies of Omarchy files kept byte for byte (ito.lock Service.qml, hash in plugins/ito.lock/service.sha256)
+  paths      every /usr/share/omarchy path our code reads
+  commands   every omarchy-* command our code runs
+  api        the Commons.* members and Ui types our QML uses (they must still exist in /usr/share/omarchy/shell)
+  qt pins    scripts/qa/check-qt-color.sh (Qt 6.12 shadowing) when the repository is present
+The surface lists (paths, commands, api) are recorded in compat/verified.json, so a check is a few file lookups.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+BIN = Path(__file__).resolve().parent
+MODULES = BIN.parent
+OMARCHY_HOME = HOME / ".config" / "omarchy"
+SHELL_DIR = Path(os.environ.get("ITO_COMPAT_SHELL", "/usr/share/omarchy/shell"))
+PKGS = {"omarchy": "omarchy", "quickshell": "quickshell-git", "qt6-base": "qt6-base", "hyprland": "hyprland"}
+PKG_ALT = {"quickshell-git": ("quickshell",)}
+SCAN_ROOTS = ("bar", "plugins", "scripts", "themes")
+SCAN_SKIP = ("scripts/qa", "scripts/lab", "__pycache__", "/backups/", "/dev/", "/.git/", "/node_modules/")
+SCAN_EXT = (".qml", ".js", ".py", ".sh", ".lua", ".json")
+
+
+def repo_root():
+    for cand in (os.environ.get("ITO_REPO"),
+                 (HOME / ".config/ito/repo").read_text().strip() if (HOME / ".config/ito/repo").exists() else None,
+                 str(MODULES.parent.parent) if (MODULES.parent.parent / "compat").is_dir() else None):
+        if cand and (Path(cand) / "plugins").is_dir() and (Path(cand) / "bar").is_dir():
+            return Path(cand)
+    return None
+
+
+def verified_path():
+    env = os.environ.get("ITO_COMPAT_FILE")
+    if env:
+        return Path(env)
+    r = repo_root()
+    for p in ((r / "compat" / "verified.json") if r else None, MODULES / "compat" / "verified.json"):
+        if p and p.is_file():
+            return p
+    return (r / "compat" / "verified.json") if r else MODULES / "compat" / "verified.json"
+
+
+def sh(cmd, timeout=15):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+# ------------------------------------------------------------------------------------------------ versions
+def installed_versions():
+    out = {}
+    for key, pkg in PKGS.items():
+        v = ""
+        if shutil.which("pacman"):
+            v = sh(["pacman", "-Q", pkg]).split(" ")[-1] if sh(["pacman", "-Q", pkg]) else ""
+            if not v:
+                for alt in PKG_ALT.get(pkg, ()):
+                    q = sh(["pacman", "-Q", alt])
+                    if q:
+                        v = q.split(" ")[-1]
+                        break
+        if not v and key == "omarchy":
+            f = Path("/usr/share/omarchy/version")
+            v = f.read_text().strip() if f.is_file() else ""
+        if not v and key == "quickshell":
+            m = re.search(r"Quickshell (\S+)", sh(["qs", "--version"]))
+            v = m.group(1) if m else ""
+        out[key] = v
+    return out
+
+
+def _nums(v):
+    return [int(x) for x in re.findall(r"\d+", v.split("-")[0])][:3]
+
+
+def drift_size(old, new):
+    """'same' | 'patch' (only the last component or the package release) | 'minor' | 'major'."""
+    if old == new:
+        return "same"
+    a, b = _nums(old), _nums(new)
+    if not a or not b:
+        return "minor"
+    if a[0] != b[0]:
+        return "major"
+    if a[1:2] != b[1:2]:
+        return "minor"
+    return "patch"
+
+
+# ------------------------------------------------------------------------------------------------ the scan
+def _iter_files(root):
+    for top in SCAN_ROOTS:
+        base = root / top
+        for dp, dn, fn in os.walk(base):
+            rel = "/" + os.path.relpath(dp, root) + "/"
+            if any(s in rel or rel.startswith("/" + s.strip("/") + "/") or rel == "/" + s.strip("/") + "/" for s in SCAN_SKIP):
+                dn[:] = []
+                continue
+            for f in fn:
+                p = Path(dp) / f
+                if p.suffix in SCAN_EXT or (p.suffix == "" and p.parent.name == "bin" and f.startswith("ito")):
+                    yield p
+
+
+def _members(qml: Path):
+    """Names a Commons / Ui singleton defines: properties, functions, signals, enums, aliases."""
+    try:
+        t = qml.read_text(errors="replace")
+    except OSError:
+        return set()
+    names = set(re.findall(r"\b(?:readonly\s+|required\s+|default\s+)*property\s+(?:alias\s+)?[\w.<>]+\s+(\w+)", t))
+    names |= set(re.findall(r"\bfunction\s+(\w+)", t))
+    names |= set(re.findall(r"\bsignal\s+(\w+)", t))
+    return names
+
+
+def scan(root: Path):
+    paths, cmds, uses, ui = set(), set(), {}, set()
+    ui_types = {p.stem for p in (SHELL_DIR / "Ui").glob("*.qml")} if (SHELL_DIR / "Ui").is_dir() else set()
+    commons = {p.stem for p in (SHELL_DIR / "Commons").glob("*.qml")} if (SHELL_DIR / "Commons").is_dir() else set()
+    for f in _iter_files(root):
+        try:
+            t = f.read_text(errors="replace")
+        except OSError:
+            continue
+        for m in re.findall(r"/usr/share/omarchy(?:/[A-Za-z0-9_.@-]+)*", t):
+            m = m.rstrip(".")
+            if m != "/usr/share/omarchy" and not re.search(r"[A-Za-z0-9]$", m):
+                continue
+            paths.add(m)
+        for m in re.findall(r"(?<![\w/.-])(omarchy-[a-z0-9]+(?:-[a-z0-9]+)*)", t):
+            cmds.add(m)
+        if f.suffix == ".qml":
+            if re.search(r"^import qs\.Commons\s*$", t, re.M):
+                for sing, mem in re.findall(r"(?<![\w.])(Color|Style|Border|Util)\.([A-Za-z_]\w*)", t):
+                    if sing in commons:
+                        uses.setdefault(sing, set()).add(mem)
+            for sing, mem in re.findall(r"\bCommons\.(Color|Style|Border|Util)\.([A-Za-z_]\w*)", t):
+                uses.setdefault(sing, set()).add(mem)
+            if re.search(r"^import qs\.Ui\s*$", t, re.M):
+                for name in re.findall(r"^\s*([A-Z]\w+)\s*\{", t, re.M):
+                    if name in ui_types and name not in {p.stem for p in f.parent.glob("*.qml")}:
+                        ui.add(name)
+    # recorded members are only those that exist today: a member that is already missing is our own typo, not drift
+    api = {}
+    for sing, mems in uses.items():
+        have = _members(SHELL_DIR / "Commons" / f"{sing}.qml")
+        api[sing] = sorted(m for m in mems if m in have)
+    present_cmds = sorted(c for c in cmds if shutil.which(c))
+    return {"paths": sorted(paths),
+            "commands": present_cmds,
+            "notCommands": sorted(cmds - set(present_cmds)),
+            "commons": api, "ui": sorted(ui)}
+
+
+# ------------------------------------------------------------------------------------------------ the check
+def item(kind, what, safe, fix, level="drift"):
+    return {"kind": kind, "level": level, "what": what, "safe": safe, "fix": fix}
+
+
+def verbatim_items(ver, root):
+    out = []
+    for v in ver.get("verbatim", []):
+        src = Path(v["source"])
+        # the hash file that is deployed (what actually runs) first, then the repository's
+        hf = next((c for c in (OMARCHY_HOME / v["hashFile"], (root / v["hashFile"]) if root else None) if c and c.is_file()), None)
+        if not src.is_file() or hf is None:
+            continue
+        cur = hashlib.sha256(src.read_bytes()).hexdigest()
+        if cur != hf.read_text().strip():
+            out.append(item("verbatim", f"{v['label']}: Omarchy's {src} changed since the copy was made.",
+                            "Not safe to ignore: our copy keeps Omarchy's old behaviour (for the lock: the old password flow) until it is rebuilt.",
+                            v["fix"]))
+    return out
+
+
+def run_check():
+    vp = verified_path()
+    root = repo_root()
+    if not vp.is_file():
+        return {"state": "broken", "verifiedFile": str(vp), "items": [item(
+            "record", "compat/verified.json is missing, so nothing can be compared.", "Unknown.",
+            "Run scripts/sync-compat.sh --record from the repository after confirming this Omarchy works.", "broken")],
+            "installed": installed_versions(), "verified": {}}
+    ver = json.loads(vp.read_text())
+    now = installed_versions()
+    items = []
+    # 1. surface: things that would break us outright
+    for p in ver.get("paths", []):
+        if not os.path.exists(p):
+            items.append(item("path", f"Omarchy no longer has {p}, which this shell reads.",
+                              "Not safe: the feature that reads it will fail or show nothing.",
+                              f"Find where Omarchy moved it (pacman -Ql omarchy | grep {Path(p).name}), then update the reader or open an issue; re-run scripts/sync-compat.sh --record afterwards.",
+                              "broken"))
+    for c in ver.get("commands", []):
+        if not shutil.which(c):
+            items.append(item("command", f"The command {c} is gone (Omarchy renamed or removed it).",
+                              "Not safe: the button or tool that runs it does nothing.",
+                              f"grep -rn {c} the repository to see who calls it, switch it to the new command, deploy.", "broken"))
+    for sing, mems in ver.get("commons", {}).items():
+        have = _members(SHELL_DIR / "Commons" / f"{sing}.qml")
+        if not (SHELL_DIR / "Commons" / f"{sing}.qml").is_file():
+            items.append(item("api", f"Omarchy's Commons/{sing}.qml is gone.", "Not safe: every widget using it fails to load.",
+                              f"grep -rn '{sing}\\.' the QML and port it to the new singleton.", "broken"))
+            continue
+        gone = [m for m in mems if m not in have]
+        if gone:
+            items.append(item("api", f"Commons.{sing} lost: {', '.join(gone)}.",
+                              "Not safe: the widgets using these see undefined values (blank colours, zero sizes).",
+                              f"grep -rn '{sing}\\.{gone[0]}' the QML, replace with the new name, run scripts/check-qml.sh, deploy.", "broken"))
+    for t in ver.get("ui", []):
+        if not (SHELL_DIR / "Ui" / f"{t}.qml").is_file():
+            items.append(item("api", f"The Omarchy UI component {t} is gone.", "Not safe: panels that use it fail to load.",
+                              f"grep -rn '{t} {{' the QML and replace it with the new component.", "broken"))
+    # 2. byte-for-byte copies
+    items += verbatim_items(ver, root)
+    # 3. Qt import pins
+    if root and (root / "scripts/qa/check-qt-color.sh").is_file():
+        r = subprocess.run([str(root / "scripts/qa/check-qt-color.sh")], capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            items.append(item("qtpin", "A QML file uses Color.* with an unversioned `import QtQuick`: Qt 6.12's own Color singleton shadows Omarchy's.\n      " + r.stdout.strip().replace("\n", "\n      "),
+                              "Not safe: colours resolve to the wrong object and the widget goes blank.",
+                              "Make the import `import QtQuick 2.15` (or alias qs.Commons) in the listed files, then scripts/qa/check-qt-color.sh.", "broken"))
+    # 4. versions: advisory, sized
+    surface_ok = not any(i["level"] == "broken" for i in items) and not any(i["kind"] == "verbatim" for i in items)
+    for key, old in ver.get("versions", {}).items():
+        new = now.get(key, "")
+        if not new or not old:
+            continue
+        size = drift_size(old, new)
+        if size == "same":
+            continue
+        if size == "patch" and surface_ok:
+            safe = "Probably safe: only a patch/package release changed and everything this shell reads is still in place."
+        elif surface_ok:
+            safe = f"A {size} update. Everything this shell reads is still in place, but it has not been tried on this version."
+        else:
+            safe = f"A {size} update, and something this shell reads has changed (see the other items): treat as unsafe until fixed."
+        items.append(item("version", f"{key} is {new}; the shell was last verified on {old}.", safe,
+                          "Use the shell for a day or run the checks (scripts/qa, ito-health). When it works, run scripts/sync-compat.sh --record to accept this version.",
+                          "info" if size == "patch" and surface_ok else "drift"))
+    state = "ok"
+    if any(i["level"] == "drift" for i in items):
+        state = "drift"
+    if any(i["level"] == "broken" for i in items):
+        state = "broken"
+    return {"state": state, "verifiedFile": str(vp), "verifiedOn": ver.get("verifiedOn", ""),
+            "installed": now, "verified": ver.get("versions", {}), "items": items,
+            "watching": {"paths": len(ver.get("paths", [])), "commands": len(ver.get("commands", [])),
+                         "commons": sum(len(v) for v in ver.get("commons", {}).values()), "ui": len(ver.get("ui", [])),
+                         "verbatim": len(ver.get("verbatim", []))}}
+
+
+def render_check(res):
+    its = [i for i in res["items"] if i["level"] != "info"]
+    infos = [i for i in res["items"] if i["level"] == "info"]
+    if not its and not infos:
+        return "ok"
+    lines = []
+    if not its:
+        lines.append("ok (with notes)")
+    for i in its + infos:
+        lines.append(f"- what changed: {i['what']}")
+        lines.append(f"  is it safe:   {i['safe']}")
+        lines.append(f"  fix:          {i['fix']}")
+    return "\n".join(lines)
+
+
+def render_status(res):
+    out = [f"verified file: {res['verifiedFile']} ({res.get('verifiedOn') or 'no date'})", "", f"{'package':12} {'verified':26} installed"]
+    for k in PKGS:
+        old, new = res["verified"].get(k, "-"), res["installed"].get(k, "") or "-"
+        out.append(f"{k:12} {old:26} {new}{'' if old == new else '   <- differs'}")
+    w = res.get("watching", {})
+    out += ["", f"watching: {w.get('paths', 0)} paths, {w.get('commands', 0)} commands, {w.get('commons', 0)} Commons members, "
+                f"{w.get('ui', 0)} Ui types, {w.get('verbatim', 0)} verbatim copy", "", "state: " + res["state"]]
+    return "\n".join(out)
+
+
+def record(dest: Path):
+    root = repo_root()
+    if not root:
+        print("record needs the repository (set ITO_REPO)", file=sys.stderr)
+        return 2
+    old = json.loads(dest.read_text()) if dest.is_file() else {}
+    s = scan(root)
+    doc = {"schema": 1, "verifiedOn": __import__("datetime").date.today().isoformat(),
+           "versions": installed_versions(),
+           "verbatim": old.get("verbatim") or [{
+               "id": "lock-service", "label": "ito.lock Service.qml",
+               "source": "/usr/share/omarchy/shell/plugins/lock/Service.qml",
+               "hashFile": "plugins/ito.lock/service.sha256",
+               "fix": "Run scripts/sync-ito-lock.sh in the repository, review `git diff plugins/ito.lock`, deploy."}],
+           "paths": s["paths"], "commands": s["commands"], "commons": s["commons"], "ui": s["ui"],
+           "notCommands": s["notCommands"]}
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(doc, indent=2) + "\n")
+    print(f"recorded {dest}")
+    return 0
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "check"
+    if cmd in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    if cmd == "scan":
+        root = repo_root()
+        if not root:
+            print("scan needs the repository (set ITO_REPO)", file=sys.stderr)
+            return 2
+        print(json.dumps(scan(root), indent=2))
+        return 0
+    if cmd == "record":
+        return record(Path(argv[2]) if len(argv) > 2 else verified_path())
+    if cmd not in ("check", "status", "json"):
+        print(__doc__)
+        return 2
+    res = run_check()
+    if cmd == "json":
+        print(json.dumps(res, indent=2))
+    elif cmd == "status":
+        print(render_status(res))
+    else:
+        print(render_check(res))
+    return {"ok": 0, "drift": 1, "broken": 2}[res["state"]]
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

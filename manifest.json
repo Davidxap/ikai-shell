@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "davidxap.ito-verse-shell",
+  "name": "IKAI",
+  "version": "0.2.0-beta",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "davidxap",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "IKAI (異界): a bar and Control Centre for Omarchy from the other world — fog, rust, ink and spirals, inspired by Junji Ito and Silent Hill.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Install IKAI",
+    "description": "A button that installs the IKAI shell from this repository, after asking.",
+    "category": "Appearance",
+    "allowMultiple": false
+  }
+}

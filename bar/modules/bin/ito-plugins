@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""ito-plugins — list every plugin the shell could show, as JSON.
+
+A plugin is a folder holding a manifest.json (id, name, kinds, entry points) next to its QML. The shell
+loads them from a set of directories; this walks the same ones and reports what it finds, where it came
+from, and whether it is already on the bar. Nothing here is specific to one distribution: extra directories
+can be added with ITO_PLUGIN_DIRS (colon separated), and the two that ship by default are the user's own and
+the ones Omarchy installs.
+
+    ito-plugins            print a JSON array
+"""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+DEFAULT_DIRS = [
+    HOME / ".config" / "ito" / "plugins",
+    HOME / ".config" / "omarchy" / "plugins",
+    Path("/usr/share/omarchy/shell/plugins"),
+]
+
+
+def dirs():
+    extra = [Path(p) for p in os.environ.get("ITO_PLUGIN_DIRS", "").split(":") if p]
+    return extra + DEFAULT_DIRS
+
+
+def source_of(pid: str, folder: Path) -> str:
+    if pid.startswith(("ito.",)):
+        return "IKAI"
+    if pid.startswith("hancore.shibumi"):
+        return "Shibumi"
+    if pid.startswith("omarchy."):
+        return "Omarchy"
+    if "/usr/share/omarchy" in str(folder):
+        return "Omarchy"
+    return "External"
+
+
+def on_bar() -> set[str]:
+    try:
+        cfg = json.loads((HOME / ".config" / "omarchy" / "shell.json").read_text())
+        layout = cfg.get("bar", {}).get("layout", {})
+        out = set()
+        for side in ("left", "center", "right"):
+            for entry in layout.get(side, []):
+                out.add(entry if isinstance(entry, str) else entry.get("id", ""))
+        return out
+    except (OSError, ValueError):
+        return set()
+
+
+def main() -> int:
+    bar = on_bar()
+    seen, out = set(), []
+    for root in dirs():
+        if not root.is_dir():
+            continue
+        for manifest in sorted(list(root.glob("*/manifest.json")) + list(root.glob("*/*/manifest.json"))):
+            try:
+                m = json.loads(manifest.read_text())
+            except (OSError, ValueError):
+                continue
+            pid = m.get("id")
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+            folder = manifest.parent
+            out.append({
+                "id": pid,
+                "name": m.get("name", pid),
+                "description": m.get("description", ""),
+                "kinds": m.get("kinds", []),
+                "version": m.get("version", ""),
+                "source": source_of(pid, folder),
+                "dir": str(folder),
+                "widget": "bar-widget" in m.get("kinds", []),
+                "onBar": pid in bar,
+            })
+    json.dump(out, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

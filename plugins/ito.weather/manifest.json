@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.weather",
+  "name": "Ito Weather",
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "davidxap",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "The sky, inked: conditions now and for the days ahead.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Weather",
+    "description": "The sky, inked: conditions now and for the days ahead.",
+    "category": "Info",
+    "allowMultiple": false
+  }
+}

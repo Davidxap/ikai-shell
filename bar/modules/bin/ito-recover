@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""ito-recover — switch every IKAI widget back on, and the seal above all.
+
+The seal is the door to the control centre, so it cannot be switched off from inside it. If it was switched
+off some other way (an edit in shell.json, an older build), the panel cannot be reached to switch it back on.
+This is the way in from the outside: it sets every IKAI widget's enabled flags to true in the state,
+and touches nothing else. The running shell picks the change up by itself.
+
+    ito-recover            re-enable all IKAI widgets
+    ito-recover --seal     re-enable only the seal
+"""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+SHELL_JSON = Path.home() / ".config" / "omarchy" / "shell.json"
+
+
+def main() -> int:
+    only_seal = "--seal" in sys.argv
+    try:
+        cfg = json.loads(SHELL_JSON.read_text())
+    except (OSError, ValueError) as e:
+        print(f"ito-recover: cannot read {SHELL_JSON}: {e}", file=sys.stderr)
+        return 1
+    entry = next((p for p in cfg.get("plugins", []) if isinstance(p, dict) and p.get("id") == "ito.state"), None)
+    if not entry or not isinstance(entry.get("ito"), dict):
+        print("ito.state has no config block yet; nothing is switched off.")
+        return 0
+    widgets = entry["ito"].setdefault("widgets", {})
+    changed = []
+    for group, settings in widgets.items():
+        if not group.startswith(("G:ito.",)):
+            continue
+        if only_seal and group != "G:ito.tomie":
+            continue
+        if settings.get("enabledV1") is False or settings.get("enabledV2") is False:
+            settings["enabledV1"] = settings["enabledV2"] = True
+            changed.append(group[2:])
+    if changed:
+        tmp = SHELL_JSON.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(cfg, indent=1))
+        os.replace(tmp, SHELL_JSON)
+    print("switched back on: " + (", ".join(changed) if changed else "nothing was off"))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

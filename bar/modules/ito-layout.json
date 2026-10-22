@@ -1,0 +1,33 @@
+{
+  "left": [
+    "ito.spiral",
+    "ito.workspaces",
+    "ito.ai"
+  ],
+  "center": [
+    "ito.weather",
+    "ito.clock",
+    "ito.tomie",
+    "ito.date"
+  ],
+  "right": [
+    "ito.tray",
+    "ito.audio",
+    "ito.mem",
+    "ito.cpu",
+    "ito.disk",
+    "ito.network",
+    "ito.display",
+    "ito.bluetooth",
+    "ito.power",
+    "ito.notifications",
+    "ito.awake",
+    "ito.nightlight",
+    "ito.recording",
+    "ito.media"
+  ],
+  "hidden": [
+    "ito.bluetooth",
+    "ito.power"
+  ]
+}

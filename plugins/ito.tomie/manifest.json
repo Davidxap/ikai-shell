@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.tomie",
+  "name": "Ito Tomie",
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "davidxap",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "The centre seal; opens the IKAI control centre.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Seal",
+    "description": "The centre seal; opens the IKAI control centre.",
+    "category": "Style",
+    "allowMultiple": false
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ito.bluetooth",
+  "name": "Ito Bluetooth",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author": "Omarchy (re-skinned by davidxap)",
+  "homepage": "https://github.com/Davidxap/ikai-shell",
+  "description": "Bluetooth device list with connect/disconnect",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Ito Bluetooth",
+    "description": "Bluetooth device list with connect/disconnect",
+    "category": "Network",
+    "allowMultiple": false
+  }
+}

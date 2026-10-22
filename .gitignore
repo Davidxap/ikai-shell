@@ -1,0 +1,53 @@
+# Transient / generated
+*.bak
+*.bak.*
+*.bak-*
+*~
+.DS_Store
+
+# Local scratch
+/tmp/
+*.log
+
+# Working notes and agent files live in dev/ (its own local git, never pushed).
+# The links below only exist so tools find them at the project root.
+/dev/
+/CLAUDE.md
+/openspec
+/.atl
+scripts/__pycache__/
+
+# third-party manga panels used locally as references; not redistributed
+bar/modules/ito-art/panels/
+__pycache__/
+*.pyc
+variants/
+
+# Silent Hill pack: unwired (D-016), kept local until S17e/S9b wire it
+bar/modules/ito-art/sh/
+bar/modules/ito-art/hollow/
+
+# lock / editor leftovers
+*.lock
+*.swp
+*.orig
+*.rej
+
+# development lab harness: not part of the shell
+/scripts/lab/
+
+# one-off Shibumi fixes, referenced by nothing
+/scripts/fix-omaplug-placement.sh
+/scripts/fix-update-center.sh
+
+# engine trial tools and a preview-sheet mock, referenced by nothing shipped
+/scripts/itobar-apply.sh
+/scripts/itobar-try.sh
+/scripts/itobar-backup.sh
+/scripts/gen-preview-sheet.py
+
+# old-brand images (read "Ito-verse"); cannot be re-rendered offscreen, kept local only
+/preview.png
+/docs/screenshots/desktop-control-center.jpg
+/docs/media/tour.gif
+/docs/media/tour.mp4

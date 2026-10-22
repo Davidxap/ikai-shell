@@ -1,0 +1,9 @@
+{
+  "payloadDigest": "964b089a1cd328350811e44b0749fd35fec2e1988e03629e7cf28894abf0e68b",
+  "pluginId": "ito.bar",
+  "schemaVersion": 1,
+  "sourceRevision": "0e53a1e203e1fdb24312de6396531f602ebbdf9d",
+  "suiteId": "ito.verse",
+  "suitePayloadDigest": "528736b832e6bab490af220eac678b9f56bf043d6bda41cff737277d3a249fed",
+  "suiteVersion": "0.1.1-beta.14.1-ito.1"
+}

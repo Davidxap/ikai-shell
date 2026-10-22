@@ -1,0 +1,743 @@
+#!/usr/bin/env bash
+# shell-switch v5.0 — detect every shell, then switch cleanly: stop → save → swap → start → verify (roll back on failure)
+# One active shell at a time. Nothing of the old shell is left running or merged into the new one.
+
+set -euo pipefail
+
+# ==================== SHELL DISCOVERY ====================
+# Shells are discovered from disk automatically:
+#   - Omarchy variants: shell.<name>.json in ~/.config/omarchy/
+#   - Caelestia: quickshell binary + its config present
+# A shell is INSTALLED only when its engine is present AND every module it
+# references resolves (user plugin dir, or an engine manifest — top-level or
+# nested widget). Anything missing is listed as NOT installed with the reason.
+
+OMARCHY_VARIANTS_DIR="$HOME/.config/omarchy"
+OMARCHY_ENGINE_PLUGINS="/usr/share/omarchy/shell/plugins"
+OMARCHY_LAUNCH="/usr/share/omarchy/bin/omarchy-launch-shell"
+
+declare -A SHELL_CMD
+declare -A SHELL_GTK
+declare -A SHELL_ON_ACTIVATE
+declare -A SHELL_ON_DEACTIVATE
+declare -A SHELL_DESC
+declare -A SHELL_STATUS
+declare -A SHELL_KIND
+SHELLS=()
+
+is_registered() {
+    local s
+    for s in "${SHELLS[@]}"; do
+        [[ "$s" == "$1" ]] && return 0
+    done
+    return 1
+}
+
+add_shell() {
+    is_registered "$1" && return 1
+    SHELLS+=("$1")
+    return 0
+}
+
+omarchy_engine_present() {
+    [[ -x "$OMARCHY_LAUNCH" ]] || command -v omarchy-launch-shell >/dev/null 2>&1
+}
+
+# A module resolves when its plugin dir exists (user config) or an engine
+# manifest (top-level plugin or nested widget) declares its id.
+module_resolves() {
+    local id="$1" m
+    [[ -d "$OMARCHY_VARIANTS_DIR/plugins/$id" ]] && return 0
+    while IFS= read -r m; do
+        [[ "$(jq -r '.id // empty' "$m" 2>/dev/null)" == "$id" ]] && return 0
+    done < <(find "$OMARCHY_ENGINE_PLUGINS" -name '*.manifest.json' 2>/dev/null)
+    return 1
+}
+
+# Status for an omarchy variant: engine + every bar/layout module id. Returns 0
+# ONLY when installed; sets SHELL_STATUS with the outcome either way.
+variant_installed() {
+    local name="$1" ids id missing=()
+    if ! omarchy_engine_present; then
+        SHELL_STATUS[$name]="the Omarchy shell engine is not installed"
+        return 1
+    fi
+    if [[ ! -f "$OMARCHY_VARIANTS_DIR/shell.$name.json" ]]; then
+        SHELL_STATUS[$name]="shell.$name.json is missing"
+        return 1
+    fi
+    ids="$(jq -r '[.bar.id, .bar.layout.left[].id, .bar.layout.center[].id, .bar.layout.right[].id] | .[]? | select(. != null)' "$OMARCHY_VARIANTS_DIR/shell.$name.json" 2>/dev/null | sort -u)"
+    if [[ -z "${ids:-}" ]]; then
+        SHELL_STATUS[$name]="invalid config or no modules"
+        return 1
+    fi
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+        module_resolves "$id" || missing+=("$id")
+    done <<<"$ids"
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        SHELL_STATUS[$name]="missing plugins: ${missing[*]}"
+        return 1
+    fi
+    SHELL_STATUS[$name]="installed"
+    return 0
+}
+
+register_omarchy_variant() {
+    local name="$1"
+    SHELL_CMD[$name]="launch_omarchy_shell"
+    SHELL_GTK[$name]="omarchy"
+    SHELL_KIND[$name]="omarchy"
+    SHELL_ON_ACTIVATE[$name]="apply_omarchy_gtk"
+    SHELL_ON_DEACTIVATE[$name]=""
+    add_shell "$name" || true
+    variant_installed "$name" || true
+}
+
+register_caelestia() {
+    SHELL_CMD[caelestia]="CAELESTIA_WALLPAPERS_DIR=\"$HOME/.local/share/wallpapers\" setsid quickshell -c caelestia >/dev/null 2>&1 < /dev/null &"
+    SHELL_GTK[caelestia]="caelestia"
+    SHELL_KIND[caelestia]="quickshell"
+    SHELL_ON_ACTIVATE[caelestia]="activate_caelestia_extras"
+    SHELL_ON_DEACTIVATE[caelestia]="deactivate_caelestia_extras"
+    add_shell caelestia || true
+    if ! command -v quickshell >/dev/null 2>&1; then
+        SHELL_STATUS[caelestia]="quickshell no instalado"
+    elif [[ ! -f "$CAELSTIA_CONFIG" ]]; then
+        SHELL_STATUS[caelestia]="the Caelestia config is missing"
+    else
+        SHELL_STATUS[caelestia]="installed"
+    fi
+}
+
+# Any Quickshell config on this machine is a shell (Caelestia, Noctalia, DMS, a user's own…). Names already
+# registered (caelestia) keep their dedicated handling.
+register_quickshell_configs() {
+    command -v quickshell >/dev/null 2>&1 || return 0
+    local d name
+    for d in "$HOME/.config/quickshell"/*/; do
+        [[ -f "$d/shell.qml" ]] || continue
+        name="$(basename "$d")"
+        [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || continue        # the name ends up in a command line
+        is_registered "$name" && continue
+        SHELL_CMD[$name]="setsid quickshell -c $name >/dev/null 2>&1 < /dev/null &"
+        SHELL_GTK[$name]=""
+        SHELL_ON_ACTIVATE[$name]=""
+        SHELL_ON_DEACTIVATE[$name]=""
+        SHELL_KIND[$name]="quickshell"
+        SHELL_STATUS[$name]="installed"
+        add_shell "$name" || true
+    done
+}
+
+# Stand-alone bars/panels that start from one plain command.
+register_standalone() {
+    local name cmd
+    for pair in "hyprpanel:hyprpanel" "nwg-panel:nwg-panel" "yambar:yambar" "ironbar:ironbar" "ags:ags run"; do
+        name="${pair%%:*}"; cmd="${pair#*:}"
+        command -v "$name" >/dev/null 2>&1 || continue
+        is_registered "$name" && continue
+        SHELL_CMD[$name]="setsid $cmd >/dev/null 2>&1 < /dev/null &"
+        SHELL_GTK[$name]=""
+        SHELL_ON_ACTIVATE[$name]=""
+        SHELL_ON_DEACTIVATE[$name]=""
+        SHELL_KIND[$name]="standalone"
+        SHELL_STATUS[$name]="installed"
+        add_shell "$name" || true
+    done
+}
+
+# Description: known names as the user keeps them; unknown derived from bar.id.
+shell_desc() {
+    local name="$1" id
+    case "$name" in
+        omarchy)   echo "Omarchy default" ;;
+        shibumi)   echo "Shibumi bar" ;;
+        ito)       echo "Ito (Verse bar)" ;;
+        caelestia) echo "Caelestia" ;;
+        *)
+            id="$(jq -r '.bar.id // empty' "$OMARCHY_VARIANTS_DIR/shell.$name.json" 2>/dev/null)"
+            echo "${id:-$name}"
+            ;;
+    esac
+}
+
+discover_shells() {
+    # Known shells first, in the order the user keeps them. They stay listed
+    # even when uninstalled, so their NOT installed state is visible.
+    register_omarchy_variant omarchy
+    register_omarchy_variant shibumi
+    register_caelestia
+    register_omarchy_variant ito
+    register_quickshell_configs
+    register_standalone
+
+    # Auto-register any variant on disk that isn't known. stock.json is the
+    # engine's fallback template, not a user shell — skip it.
+    local f name
+    for f in "$OMARCHY_VARIANTS_DIR"/shell.*.json; do
+        [[ -e "$f" ]] || continue
+        name="$(basename "$f")"; name="${name#shell.}"; name="${name%.json}"
+        [[ "$name" == "stock" ]] && continue
+        # `itobar` is only a second copy of `ito` (kept equal by the switcher), not another shell
+        [[ "$name" == "itobar" && -f "$OMARCHY_VARIANTS_DIR/shell.ito.json" ]] && continue
+        is_registered "$name" || register_omarchy_variant "$name"
+    done
+
+    local s
+    for s in "${SHELLS[@]}"; do
+        SHELL_DESC[$s]="$(shell_desc "$s")"
+    done
+}
+
+# ==================== OMARCHY VARIANT SWAP ====================
+# omarchy-shell reads a single live file (~/.config/omarchy/shell.json).
+# Variants (shell.<name>.json) are swapped in so each shell keeps its own bar
+# without altering the others. The live config file is excluded from discovery.
+swap_omarchy_variant() {
+    local name="$1"                          # logical name for logging
+    local src_name="${2:-$name}"             # config file basename: shell.<src_name>.json
+    local src="$OMARCHY_VARIANTS_DIR/shell.$src_name.json"
+    local dst="$OMARCHY_VARIANTS_DIR/shell.json"
+    [[ -f "$src" ]] || die "Omarchy variant '$name' missing ($src)"
+    jq -e . "$src" >/dev/null 2>&1 || die "Omarchy variant '$name' is not valid JSON ($src)"
+    # Atomic: the engine never sees a half-written file.
+    cp "$src" "$dst.tmp" && mv -f "$dst.tmp" "$dst"
+    log_ok "Omarchy variant: $name"
+}
+
+DRY_RUN=0
+# ==================== CONSTANTS ====================
+CHOICE_FILE="$HOME/.config/hypr/shell-choice"
+CAELSTIA_CONFIG="$HOME/.config/caelestia/cli.json"
+
+discover_shells
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+log_info()  { echo -e "${BLUE}[shell-switch]${NC} $*"; }
+log_ok()    { echo -e "${GREEN}[shell-switch]${NC} $*"; }
+log_warn()  { echo -e "${YELLOW}[shell-switch]${NC} $*"; }
+log_err()   { echo -e "${RED}[shell-switch]${NC} $*" >&2; }
+die() { log_err "$*"; exit 1; }
+
+# ==================== GRACEFUL CLOSE ====================
+# Send SIGTERM, wait up to 5s for the process to exit, then SIGKILL as last resort.
+# This lets the old shell release GTK state, D-Bus names, and Wayland resources
+# so the new shell applies cleanly.
+close_by_pattern() {
+    local pattern="$1"
+    local pids=()
+    # Collect PIDs, excluding pgrep itself and this script's entire process tree
+    # (shell-switch contains shell names in its command line / script body).
+    for pid in $(pgrep -f "$pattern" 2>/dev/null | grep -v pgrep); do
+        # Skip ourselves
+        [[ "$pid" == "$$" ]] && continue
+        # Skip our parent shell
+        [[ "$pid" == "$PPID" ]] && continue
+        # Skip any ancestor of this script (bash running shell-switch)
+        local ancestor="$PPID"
+        local safe=0
+        while [[ "$ancestor" -gt 1 ]] && [[ $safe -lt 20 ]]; do
+            [[ "$pid" == "$ancestor" ]] && break
+            ancestor="$(ps -o ppid= -p "$ancestor" 2>/dev/null | tr -d ' ')" || break
+            [[ -z "$ancestor" ]] && break
+            safe=$((safe + 1))
+        done
+        [[ "$pid" == "$ancestor" ]] && continue
+        # Skip if the process is this script itself (by PID and by cmdline)
+        local cmd
+        cmd="$(ps -o args= -p "$pid" 2>/dev/null)" || continue
+        [[ -z "$cmd" ]] && continue  # dead process, skip
+        [[ "$cmd" == *"shell-switch"* ]] && continue
+        pids+=("$pid")
+    done
+    [[ ${#pids[@]} -eq 0 ]] && return 0
+
+    # Phase 1: SIGTERM (graceful)
+    for pid in "${pids[@]}"; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+
+    # Phase 2: wait up to 5s for graceful exit
+    local waited=0
+    while [[ $waited -lt 50 ]]; do
+        local still_alive=0
+        for pid in "${pids[@]}"; do
+            kill -0 "$pid" 2>/dev/null && still_alive=1
+        done
+        [[ $still_alive -eq 0 ]] && break
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+
+    # Phase 3: SIGKILL only if still alive after 5s
+    for pid in "${pids[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            log_warn "Force-killed $pid (did not exit after SIGTERM)"
+        fi
+    done
+}
+
+# Everything that can put a bar (or a second copy of the shell) on screen.
+BAR_PROCS=(waybar hyprpanel eww nwg-panel yambar polybar ironbar sfwbar ags caelestia-wallpaper)
+
+# The Omarchy launcher loop: a bash running that script, not anything that merely mentions it.
+launcher_pids() {
+    pgrep -f '^(/usr)?/bin/(ba)?sh( -[a-z]+)* [^ ]*/omarchy-launch-shell( |$)' 2>/dev/null
+}
+
+shells_running() {
+    pgrep -x quickshell >/dev/null 2>&1 && return 0
+    launcher_pids >/dev/null && return 0
+    local b
+    for b in "${BAR_PROCS[@]}"; do
+        pgrep -x "$b" >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
+# The Omarchy launcher is a restart LOOP: killing quickshell under it only makes it come back, with whatever
+# config is on disk at that moment. So the loop goes first, then the shells, then a wait until nothing is left.
+close_all_shells() {
+    if [[ "${DRY_RUN:-0}" == 1 ]]; then log_info "[dry-run] would stop: launcher loop, quickshell, ${BAR_PROCS[*]}"; return 0; fi
+    log_info "Closing all shells gracefully..."
+
+    # 1. the launcher loops (its trap stops its own quickshell and exits without relaunching)
+    local pid
+    for pid in $(launcher_pids); do kill -TERM "$pid" 2>/dev/null || true; done
+
+    # 2. quickshell the way Omarchy does it: each kill returns only once that instance has fully exited
+    local cfg
+    for cfg in /usr/share/omarchy/shell; do
+        while timeout 5 quickshell kill -p "$cfg" --any-display >/dev/null 2>&1; do :; done
+    done
+    local d
+    for d in "$HOME/.config/quickshell"/*/; do
+        [[ -f "$d/shell.qml" ]] || continue
+        while timeout 5 quickshell kill -c "$(basename "$d")" --any-display >/dev/null 2>&1; do :; done
+    done
+
+    # 3. whatever is left, by name
+    for pid in $(pgrep -x quickshell 2>/dev/null); do kill -TERM "$pid" 2>/dev/null || true; done
+    local b
+    for b in "${BAR_PROCS[@]}"; do
+        pkill -TERM -x "$b" 2>/dev/null || true
+    done
+
+    # 4. wait until nothing is left; KILL what ignored TERM
+    local waited=0
+    while shells_running && [[ $waited -lt 50 ]]; do sleep 0.1; waited=$((waited + 1)); done
+    if shells_running; then
+        pkill -KILL -x quickshell 2>/dev/null || true
+        for pid in $(launcher_pids); do kill -KILL "$pid" 2>/dev/null || true; done
+        for b in "${BAR_PROCS[@]}"; do pkill -KILL -x "$b" 2>/dev/null || true; done
+        sleep 0.3
+        log_warn "Some processes needed SIGKILL"
+    fi
+    shells_running && die "A shell is still running after the close; refusing to start another on top of it"
+
+    # Nothing may bring a second bar back at the next login either.
+    if [[ "${SWITCH_KEEP_WAYBAR:-0}" != 1 ]]; then
+        rm -f "$WAYBAR_CHOICE" "$WAYBAR_TOGGLE"
+    fi
+    sleep 0.3
+    log_ok "All shells closed"
+}
+
+# ==================== GTK SYNC ====================
+apply_omarchy_gtk() {
+    local theme_dir="$HOME/.local/state/omarchy/current/theme"
+    local colors_file="$theme_dir/colors.toml"
+
+    if [[ -f "$colors_file" ]]; then
+        local mode
+        mode=$(omarchy-theme-color --file "$colors_file" mode 2>/dev/null || echo "dark")
+
+        if [[ "$mode" == "light" ]]; then
+            gsettings set org.gnome.desktop.interface color-scheme "prefer-light" 2>/dev/null || true
+            gsettings set org.gnome.desktop.interface gtk-theme "Adwaita" 2>/dev/null || true
+        else
+            gsettings set org.gnome.desktop.interface color-scheme "prefer-dark" 2>/dev/null || true
+            gsettings set org.gnome.desktop.interface gtk-theme "Adwaita-dark" 2>/dev/null || true
+        fi
+
+        local icons_theme="$theme_dir/icons.theme"
+        if [[ -f "$icons_theme" ]]; then
+            gsettings set org.gnome.desktop.interface icon-theme "$(<$icons_theme)" 2>/dev/null || true
+        else
+            gsettings set org.gnome.desktop.interface icon-theme "Yaru-blue" 2>/dev/null || true
+        fi
+        log_ok "Omarchy GTK applied (mode: $mode)"
+    fi
+}
+
+set_caelestia_gtk_authority() {
+    local enable="$1"
+    if [[ -f "$CAELSTIA_CONFIG" ]]; then
+        local tmp
+        tmp=$(mktemp)
+        jq --argjson enable "$enable" '.theme.enableGtk = $enable' "$CAELSTIA_CONFIG" > "$tmp" && mv "$tmp" "$CAELSTIA_CONFIG"
+        log_ok "Caelestia GTK authority: $enable"
+    fi
+}
+
+clear_caelestia_gtk() {
+    log_info "Clearing Caelestia GTK overrides..."
+    rm -f ~/.config/gtk-3.0/gtk.css ~/.config/gtk-3.0/thunar.css 2>/dev/null
+    rm -f ~/.config/gtk-4.0/gtk.css ~/.config/gtk-4.0/thunar.css 2>/dev/null
+}
+
+# ==================== CAELESTIA EXTRAS ====================
+activate_caelestia_extras() {
+    set_caelestia_gtk_authority true
+
+    # Sync wallpaper from omarchy to caelestia
+    local omarchy_bg
+    omarchy_bg="$(readlink -f "$HOME/.local/state/omarchy/current/background" 2>/dev/null || true)"
+    if [[ -n "${omarchy_bg:-}" && -f "$omarchy_bg" ]]; then
+        CAELESTIA_WALLPAPERS_DIR="$HOME/.local/share/wallpapers" caelestia wallpaper -f "$omarchy_bg" >/dev/null 2>&1 || true
+    fi
+
+    # Run user activate script if present (starts caelestia services)
+    if [[ -x "$HOME/.config/caelestia/activate.sh" ]]; then
+        "$HOME/.config/caelestia/activate.sh" || true
+    fi
+}
+
+deactivate_caelestia_extras() {
+    set_caelestia_gtk_authority false
+    clear_caelestia_gtk
+}
+
+# ==================== SAVE / LAUNCH / VERIFY ====================
+live_bar_id() { jq -r '.bar.id // ""' "$OMARCHY_VARIANTS_DIR/shell.json" 2>/dev/null; }
+variant_bar_id() { jq -r '.bar.id // ""' "$OMARCHY_VARIANTS_DIR/shell.$1.json" 2>/dev/null; }
+
+# The engine edits shell.json (the layout you arrange, the widgets you switch off). If that were not carried
+# back to the variant it came from, the next visit would start from a stale copy and the two would drift.
+# Only when the live file really is that variant's bar.
+save_live_to_variant() {
+    local name="$1" live="$OMARCHY_VARIANTS_DIR/shell.json" var="$OMARCHY_VARIANTS_DIR/shell.$1.json"
+    [[ -f "$var" && -f "$live" ]] || return 0
+    [[ "${SHELL_KIND[$name]:-}" == "omarchy" ]] || return 0
+    # Only the variants of the Ito bar are carried back: its layout is edited through its own tools. Other
+    # variants stay exactly as the user keeps them, unless SWITCH_SAVE_ALL=1 asks for them to be saved too.
+    if [[ "$(variant_bar_id "$name")" != "ito.bar" && "${SWITCH_SAVE_ALL:-0}" != 1 ]]; then return 0; fi
+    jq -e . "$live" >/dev/null 2>&1 || { log_warn "Live shell.json is not valid; not saved"; return 0; }
+    [[ "$(live_bar_id)" == "$(variant_bar_id "$name")" && -n "$(live_bar_id)" ]] || return 0
+    cmp -s "$live" "$var" && return 0
+    cp "$var" "$var.prev"
+    cp "$live" "$var.tmp" && mv -f "$var.tmp" "$var"
+    # `itobar` is a copy of `ito`; keep the pair equal so either name opens the same bar
+    if [[ "$name" == "ito" && -f "$OMARCHY_VARIANTS_DIR/shell.itobar.json" ]]; then
+        cp "$var" "$OMARCHY_VARIANTS_DIR/shell.itobar.json"
+    fi
+    log_ok "Saved the current layout back to shell.$name.json"
+}
+
+# Omarchy's own way: spawn from Hyprland so the shell inherits the session environment.
+launch_omarchy_shell() {
+    if ! hyprctl dispatch 'hl.dsp.exec_cmd("omarchy-launch-shell")' >/dev/null 2>&1; then
+        setsid omarchy-launch-shell >/dev/null 2>&1 < /dev/null &
+    fi
+}
+
+launcher_count() { launcher_pids | wc -l; }
+
+# A switch has worked only when the new shell answers AND is the one that was asked for AND is alone.
+verify_shell() {
+    local name="$1" kind="${SHELL_KIND[$1]:-}" tries=0
+    [[ "${DRY_RUN:-0}" == 1 ]] && return 0
+    while [[ $tries -lt 100 ]]; do
+        case "$kind" in
+            omarchy)
+                if OMARCHY_SHELL_IPC_TIMEOUT=0.5s omarchy-shell shell ping >/dev/null 2>&1; then
+                    [[ "$(live_bar_id)" == "$(variant_bar_id "$name")" ]] || { log_err "Live bar is '$(live_bar_id)', expected '$(variant_bar_id "$name")'"; return 1; }
+                    [[ "$(launcher_count)" -le 1 ]] || { log_err "More than one launcher is running"; return 1; }
+                    return 0
+                fi ;;
+            *)
+                pgrep -f "[q]uickshell.*$name|[${name:0:1}]${name:1}" >/dev/null 2>&1 && { sleep 1; return 0; } ;;
+        esac
+        sleep 0.1
+        tries=$((tries + 1))
+    done
+    return 1
+}
+
+# ==================== MAIN SWITCH ====================
+start_target() {
+    local target="$1"
+    if [[ "${DRY_RUN:-0}" == 1 ]]; then log_info "[dry-run] would install variant + start '$target'"; return 0; fi
+    if [[ "${SHELL_KIND[$target]:-}" == "omarchy" ]]; then
+        swap_omarchy_variant "$target"
+    fi
+    eval "${SHELL_CMD[$target]}"
+}
+
+# The recorded choice is only a memory; what is on the machine is the truth.
+current_shell() {
+    local rec; rec="$(cat "$CHOICE_FILE" 2>/dev/null || echo "")"
+    echo "$rec"
+}
+
+switch_to() {
+    local target="$1"
+    [[ -n "${SHELL_CMD[$target]:-}" ]] || die "Shell '$target' does not exist. Available: ${SHELLS[*]}"
+    [[ "${SHELL_STATUS[$target]}" == "installed" ]] \
+        || die "Shell '$target' NOT installed (${SHELL_STATUS[$target]:-unknown state}). Run: shell-switch list"
+
+    # Started from a panel there is no terminal, and the shell that started us is about to be closed: writing
+    # to its pipe afterwards would kill this script halfway (SIGPIPE), leaving nothing running. So without a
+    # terminal everything goes to a log, and a closed pipe or hangup is ignored.
+    trap '' PIPE HUP
+    if [[ ! -t 1 && "$DRY_RUN" != 1 ]]; then
+        local logdir="${XDG_STATE_HOME:-$HOME/.local/state}"
+        mkdir -p "$logdir" && exec >>"$logdir/shell-switch.log" 2>&1
+        date '+--- %F %T' 
+    fi
+
+    # One switch at a time.
+    exec 9>"${XDG_RUNTIME_DIR:-/tmp}/shell-switch.lock"
+    flock -n 9 || die "Another switch is already running"
+    # The shell started below inherits this descriptor, and a lock lives as long as anything holds it. So the
+    # lock is released explicitly when this script ends, however it ends.
+    trap 'flock -u 9 2>/dev/null' EXIT
+
+    # Stopping the shell of a locked session strands it behind Hyprland's failsafe.
+    if command -v omarchy-hyprland-session-locked >/dev/null 2>&1 && omarchy-hyprland-session-locked; then
+        die "The session is locked; refusing to switch shells"
+    fi
+
+    local current
+    current="$(current_shell)"
+    if [[ "$current" == "$target" ]] && shells_running; then
+        log_warn "Already on '$target'"
+        return 0
+    fi
+
+    log_info "SWITCH: ${current:-?} -> $target"
+
+    # 1. carry the running layout back to the variant it belongs to, before anything is stopped
+    if [[ "${DRY_RUN:-0}" == 1 ]]; then
+        log_info "[dry-run] save live shell.json (bar '$(live_bar_id)') back to shell.${current:-?}.json if it is that bar"
+    else
+        [[ -n "$current" ]] && save_live_to_variant "$current"
+    fi
+
+    # 2. release what the old shell holds (GTK authority etc.)
+    local on_deact="${SHELL_ON_DEACTIVATE[$current]:-}"
+    [[ "$DRY_RUN" != 1 && -n "$on_deact" ]] && $on_deact
+
+    # 3. stop everything, and wait until it is really gone
+    [[ "${SHELL_KIND[$target]:-}" == "standalone" || "$target" == "waybar" ]] && SWITCH_KEEP_WAYBAR=1
+    close_all_shells
+
+    # 4. GTK sync, after the old shell is gone and before the new one starts
+    [[ "$DRY_RUN" == 1 ]] && SHELL_GTK[$target]=""
+    case "${SHELL_GTK[$target]:-}" in
+        omarchy)
+            set_caelestia_gtk_authority false 2>/dev/null || true
+            clear_caelestia_gtk
+            apply_omarchy_gtk
+            ;;
+        caelestia) set_caelestia_gtk_authority true ;;
+        *) ;;
+    esac
+
+    # 5. extras, then the shell itself
+    local on_act="${SHELL_ON_ACTIVATE[$target]:-}"
+    [[ "$DRY_RUN" != 1 && -n "$on_act" ]] && $on_act
+    start_target "$target"
+
+    # 6. it must be the shell that was asked for, alone; otherwise put the old one back
+    if verify_shell "$target"; then
+        [[ "${DRY_RUN:-0}" == 1 ]] || echo "$target" > "$CHOICE_FILE"
+        log_ok "SWITCH COMPLETE: $target"
+        return 0
+    fi
+
+    log_err "'$target' did not come up cleanly"
+    if [[ -n "$current" && "$current" != "$target" && -n "${SHELL_CMD[$current]:-}" ]]; then
+        log_warn "Rolling back to '$current'"
+        SWITCH_KEEP_WAYBAR=0
+        close_all_shells
+        start_target "$current"
+        verify_shell "$current" && log_ok "Rolled back to '$current'" || log_err "Rollback did not come up either"
+    fi
+    return 1
+}
+
+# ==================== WAYBAR SUPPORT ====================
+# Waybar profiles live in omarchy theme dirs: <theme>/waybar/{config.jsonc,style.css,colors.css,scripts/}
+# Only themes with a full waybar/ dir are listed. Using one hides the native bar.
+
+WAYBAR_DIR="$HOME/.config/waybar"
+WAYBAR_TOGGLE="$HOME/.local/state/omarchy/toggles/bar-off"
+WAYBAR_CHOICE="$HOME/.local/state/omarchy/waybar-choice"
+THEMES_DIR="$HOME/.config/omarchy/themes"
+WAYBAR_PROFILES_DIR="$HOME/.config/waybar-profiles"
+
+# Resolve a waybar profile dir: checks external profiles first, then omarchy themes.
+# Returns the source dir path, or empty if not found.
+waybar_resolve() {
+    local name="$1"
+    # External profiles (downloaded from GitHub etc.)
+    if [[ -f "$WAYBAR_PROFILES_DIR/$name/config.jsonc" ]]; then
+        echo "$WAYBAR_PROFILES_DIR/$name"
+        return 0
+    fi
+    # Omarchy theme waybars
+    if [[ -f "$THEMES_DIR/$name/waybar/config.jsonc" ]]; then
+        echo "$THEMES_DIR/$name/waybar"
+        return 0
+    fi
+    return 1
+}
+
+# List all waybar profiles: external + theme-based.
+cmd_waybar_list() {
+    echo -e "${BLUE}Waybar profiles:${NC}"
+    local found=0
+    # External
+    if [[ -d "$WAYBAR_PROFILES_DIR" ]]; then
+        for p in "$WAYBAR_PROFILES_DIR"/*/; do
+            [[ -f "$p/config.jsonc" ]] || continue
+            found=1
+            echo "  $(basename "$p")  (custom)"
+        done
+    fi
+    # Theme-based
+    for t in "$THEMES_DIR"/*/; do
+        if [[ -d "$t/waybar" ]]; then
+            found=1
+            echo "  $(basename "$t")  (omarchy theme)"
+        fi
+    done
+    [[ $found -eq 0 ]] && echo "  (none)"
+    echo
+    if pgrep -x waybar >/dev/null 2>&1; then
+        echo -e "Waybar: ${GREEN}RUNNING${NC}"
+        local choice
+        choice="$(cat "$WAYBAR_CHOICE" 2>/dev/null || echo "")"
+        [[ -n "$choice" ]] && echo "Profile: $choice"
+    else
+        echo "Waybar: not running (native bar active)"
+    fi
+}
+
+cmd_waybar_on() {
+    local theme="$1"
+    local src
+    src="$(waybar_resolve "$theme")" || die "Waybar profile '$theme' not found. Run: shell-switch waybar list"
+
+    # 1. Kill existing waybar (graceful)
+    close_by_pattern "waybar"
+
+    # 2. Copy theme waybar config into place
+    mkdir -p "$WAYBAR_DIR"
+    cp -r "$src/." "$WAYBAR_DIR/"
+    log_ok "Waybar config: $theme"
+
+    # 3. Hide native bar so only waybar shows
+    mkdir -p "$(dirname "$WAYBAR_TOGGLE")"
+    touch "$WAYBAR_TOGGLE"
+    # Hide native bar immediately (not just at boot)
+    omarchy toggle bar on >/dev/null 2>&1 || true
+
+    # 4. Persist choice so autostart.lua relaunches it after reboot
+    echo "$theme" > "$WAYBAR_CHOICE"
+
+    # 5. Launch waybar
+    setsid waybar >/dev/null 2>&1 < /dev/null &
+    sleep 1
+
+    if pgrep -x waybar >/dev/null 2>&1; then
+        log_ok "Waybar '$theme' running (native bar hidden, persists across reboot)"
+    else
+        rm -f "$WAYBAR_TOGGLE" "$WAYBAR_CHOICE"
+        die "Waybar failed to start — restored native bar"
+    fi
+}
+
+cmd_waybar_off() {
+    close_by_pattern "waybar"
+    rm -f "$WAYBAR_TOGGLE" "$WAYBAR_CHOICE"
+    # Restore omarchy's bundled waybar config (so future 'waybar on' is clean)
+    if [[ -f "$THEMES_DIR/lavender/waybar/config.jsonc" ]]; then
+        cp -r "$THEMES_DIR/lavender/waybar/." "$WAYBAR_DIR/" 2>/dev/null || true
+    fi
+    log_ok "Waybar off — native bar restored (choice cleared)"
+}
+
+# ==================== COMMANDS ====================
+cmd_list() {
+    local current
+    current="$(cat "$CHOICE_FILE" 2>/dev/null || echo "")"
+    echo -e "${BLUE}Available shells:${NC}"
+    local s marker status desc
+    for s in "${SHELLS[@]}"; do
+        marker="" status="${SHELL_STATUS[$s]}"
+        [[ "$s" == "$current" ]] && marker=" ${GREEN}<- ACTIVE${NC}"
+        desc="${SHELL_DESC[$s]:-$s}"
+        if [[ "$status" == "installed" ]]; then
+            echo -e "  ${s}    \t${desc}   ${GREEN}installed${NC}${marker}"
+        else
+            echo -e "  ${s}    \t${desc}   ${RED}NOT installed${NC} (${status})${marker}"
+        fi
+    done
+}
+
+# The same discovery, as data for other tools (the Ito control centre reads this).
+cmd_json() {
+    local current s first=1
+    current="$(cat "$CHOICE_FILE" 2>/dev/null || echo "")"
+    printf '{"current":"%s","shells":[' "$current"
+    for s in "${SHELLS[@]}"; do
+        [[ $first -eq 1 ]] || printf ','
+        first=0
+        jq -nc --arg id "$s" --arg desc "${SHELL_DESC[$s]:-$s}" --arg status "${SHELL_STATUS[$s]:-}" \
+            --arg kind "${SHELL_KIND[$s]:-}" --argjson active "$([[ "$s" == "$current" ]] && echo true || echo false)" \
+            '{id:$id, desc:$desc, installed:($status=="installed"), reason:(if $status=="installed" then "" else $status end), kind:$kind, active:$active}' | tr -d '\n'
+    done
+    printf ']}\n'
+}
+
+cmd_status() {
+    echo "=== Active processes ==="
+    pgrep -af "quickshell|omarchy-shell|waybar|hyprpanel" 2>/dev/null | grep -v grep || echo "  (none)"
+    echo
+    echo "=== GTK ==="
+    [[ -f "$CAELSTIA_CONFIG" ]] && jq -r '.theme.enableGtk' "$CAELSTIA_CONFIG" 2>/dev/null | sed 's/^/Caelestia GTK: /'
+    gsettings get org.gnome.desktop.interface gtk-theme 2>/dev/null | sed 's/^/GTK theme: /'
+    gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null | sed 's/^/Color scheme: /'
+    echo
+    echo "=== Current shell ==="
+    cat "$CHOICE_FILE" 2>/dev/null || echo "omarchy (default)"
+}
+
+# ==================== ENTRY POINT ====================
+if [[ "${1:-}" == "--dry-run" ]]; then DRY_RUN=1; shift; fi
+cmd="${1:-status}"
+case "$cmd" in
+    list)   cmd_list ;;
+    json)   cmd_json ;;
+    status) cmd_status ;;
+    waybar)
+        subcmd="${2:-list}"
+        case "$subcmd" in
+            list) cmd_waybar_list ;;
+            on)   cmd_waybar_on "${3:?Usage: shell-switch waybar on <theme>}" ;;
+            off)  cmd_waybar_off ;;
+            *)    echo "Usage: shell-switch waybar [list|on <theme>|off]"; exit 1 ;;
+        esac
+        ;;
+    *)  if is_registered "$cmd"; then
+            switch_to "$cmd"
+        else
+            echo "Usage: shell-switch [$(IFS='|'; echo "${SHELLS[*]}")|list|status|waybar list|waybar on <theme>|waybar off]"
+            exit 1
+        fi
+        ;;
+esac
