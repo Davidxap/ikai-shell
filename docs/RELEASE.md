@@ -55,7 +55,7 @@ cd /mnt/DATA/Themes/Ito-verse
 git checkout --orphan ikai-release
 # every path that is ignored but still tracked leaves the index first (the files stay on disk):
 git ls-files -ci --exclude-standard -z | xargs -0 -r git rm --cached -q
-#   for the decisions above this removes the tracked files of scripts/lab/, the ignored scripts and the old-brand images (preview.png, docs/screenshots/desktop-control-center.jpg, docs/media/tour.gif, tour.mp4); to see them first: git ls-files -ci --exclude-standard
+#   for the decisions above this removes the tracked files of scripts/lab/, the ignored scripts and the old-brand images (preview.png, docs/screenshots/desktop-control-center.jpg); to see them first: git ls-files -ci --exclude-standard
 git rm -r --cached -q --ignore-unmatch scripts/lab   # explicit form of the same thing, harmless if already gone
 scripts/release-check.sh            # 4b must now PASS
 git add -A                          # honours .gitignore: dev/, CLAUDE.md, openspec, .atl, pycache stay out

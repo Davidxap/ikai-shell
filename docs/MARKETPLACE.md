@@ -53,9 +53,9 @@ marketplace process. The only stated requirements are technical; the submission 
 > Install: `omarchy plugin add https://github.com/Davidxap/ikai-shell`, enable the *Install IKAI* widget and answer the
 > questions in the terminal. Requires Omarchy 4.0.6 or newer. Beta.
 
-**Screenshots (in this order):** `docs/screenshots/bar-hero.png`,
-`docs/screenshots/cc-workspaces.png`, `docs/screenshots/cc-icons.png`, `docs/screenshots/popup-emblems.png`,
-`docs/screenshots/bar-vertical.png`.
+**Screenshots (in this order):** `docs/screenshots/bar-dark.png`,
+`docs/screenshots/cc-workspaces-dark.png`, `docs/screenshots/cc-widgets-dark.png`, `docs/screenshots/popup-calendar-dark.png`,
+`docs/screenshots/bar-light.png`.
 
 **Licence note:** the code is PolyForm Noncommercial 1.0.0 (free for non-commercial use); the art is under a separate
 personal, non-commercial art licence (`ART_LICENSE.md`). The bar engine (`plugins/ito.bar`, `plugins/ito.state`) is a fork of

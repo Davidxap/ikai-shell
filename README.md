@@ -8,7 +8,7 @@ The other world, one bar tall.
 with a bar of its own, drawn as fine engravings instead of flat vector icons, and gives you a Control Centre to change
 nearly everything without touching a file.
 
-![IKAI: the bar](docs/screenshots/bar-hero.png)
+![IKAI: the bar](docs/screenshots/bar-dark.png)
 
 > **Status: beta.** This is the first version meant to be installed and used. It has been swept option by option
 > and reviewed, but it is young: if anything looks wrong, open the Control Centre → **Health**, press
@@ -38,10 +38,8 @@ interface found on the other side, rusted, hand-inked, a little wrong. So the na
 
 The longer story, the migration note and the credits are in [docs/ABOUT.md](docs/ABOUT.md).
 
-> **About the theme you see.** The captures were made with an early version of a colour theme called
-> **Tomie**, based on *Tomie* by Junji Ito (the red-and-bone wallpaper is its only image here). It is a **work in progress**:
-> what you see are first ideas, and the wallpaper is only there to give an impression. The finished theme will be released
-> separately. IKAI works with any Omarchy theme. Link: *coming soon* (see [The Tomie theme](#the-tomie-theme)).
+> **About the captures.** Every image here shows the current shell on two Omarchy themes: **Sakura Mochi** (dark) and
+> **Woman with Floral Composition** (light). IKAI follows whichever Omarchy theme is installed.
 
 ## What you get
 
@@ -103,79 +101,53 @@ The longer story, the migration note and the credits are in [docs/ABOUT.md](docs
 
 Full tour of every feature: [docs/FEATURES.md](docs/FEATURES.md).
 
-Each popup carries a small sign at its head, in the theme's colours: the widget's current icon, the same drawing and style the bar uses (Original, Ink or Relic, per widget), so the Display popup shows the current display icon. The calendar keeps its drawn clock.
+Each popup carries a small sign at its head, in the theme's colours: the widget's current icon, the same drawing and style the bar uses (Original, Ink or Relic, per widget). The calendar keeps its drawn clock. The accent is the installed theme's; the ink and bone follow its background and foreground, so the same popup turns dark or light with the theme.
 
-> The popup screenshots below were taken on the **Blackturq** theme, which is why they are teal (the calendar, on **Nord**, is blue). The shell wears whichever
-> Omarchy theme is installed, so the same popups turn blue on Nord, pink on Banish, and so on: the accent is the theme's, the
-> ink and bone follow its background and foreground (the bar on Nord is shown under [Screenshots](#screenshots)).
-
-![The emblems: eye, waves, signal, rune, flame, spiral, clock, telephone, mind, and the sky](docs/screenshots/popup-emblems.png)
-
-| | |
+| Sakura Mochi (dark) | Woman with Floral Composition (light) |
 |---|---|
-| ![The calendar, with a clock, on Nord](docs/screenshots/popup-calendar.png) | ![The forecast, with the sky for its emblem](docs/screenshots/popup-forecast.png) |
-
-![The media player, with a spiral](docs/screenshots/popup-player.png)
-
-On a bar at the side of the screen the seal's decoration lies across the bar, above and below the seal, and the popups open
-beside it:
-
-![A vertical bar](docs/screenshots/bar-vertical.png)
+| ![The calendar on a dark theme](docs/screenshots/popup-calendar-dark.png) | ![The calendar on a light theme](docs/screenshots/popup-calendar-light.png) |
 
 ## Screenshots
 
-Captured on the [Tomie theme](#the-tomie-theme), at native resolution.
+A short tour of the Control Center (animated: [docs/media/tour.mp4](docs/media/tour.mp4)):
 
-| | |
+![Control Center tour](docs/media/tour.gif)
+
+The bar, top edge, flush against the screen (each island cut out):
+
+![The bar, dark](docs/screenshots/bar-dark.png)
+
+![The bar, light](docs/screenshots/bar-light.png)
+
+The menu and workspaces, the centre with the seal, the indicators, and the tray with media (dark on the left, light on the right):
+
+| Dark | Light |
 |---|---|
-| ![Bars](docs/screenshots/cc-bars.png) | ![Icons](docs/screenshots/cc-icons.png) |
-| ![Logo](docs/screenshots/cc-logo.png) | ![Effects](docs/screenshots/cc-effects.png) |
-| ![Workspaces](docs/screenshots/cc-workspaces.png) | ![Colors](docs/screenshots/cc-colors.png) |
-| ![Plugins](docs/screenshots/cc-plugins.png) | ![Setup](docs/screenshots/cc-setup.png) |
-| ![Health](docs/screenshots/cc-health.png) | |
+| ![Menu and workspaces](docs/screenshots/menu-workspaces-dark.png) | ![Menu and workspaces](docs/screenshots/menu-workspaces-light.png) |
+| ![Centre cluster](docs/screenshots/center-cluster-dark.png) | ![Centre cluster](docs/screenshots/center-cluster-light.png) |
+| ![Indicators](docs/screenshots/indicators-dark.png) | ![Indicators](docs/screenshots/indicators-light.png) |
+| ![Tray and media](docs/screenshots/tray-media-dark.png) | ![Tray and media](docs/screenshots/tray-media-light.png) |
 
-The bar as it is arranged now, on the **Nord** theme (each island cut out; the accent, ink and bone are Nord's, which is why it
-is blue where the popup captures above, taken on Blackturq, are teal):
+### Control Center
 
-![The bar on Nord](docs/screenshots/bar-nord.png)
+| Dark | Light |
+|---|---|
+| ![Styles](docs/screenshots/cc-styles-dark.png) | ![Styles](docs/screenshots/cc-styles-light.png) |
+| ![Bars](docs/screenshots/cc-bars-dark.png) | ![Bars](docs/screenshots/cc-bars-light.png) |
+| ![Icons](docs/screenshots/cc-widgets-dark.png) | ![Icons](docs/screenshots/cc-widgets-light.png) |
+| ![Logo](docs/screenshots/cc-logo-dark.png) | ![Logo](docs/screenshots/cc-logo-light.png) |
+| ![Effects](docs/screenshots/cc-effects-dark.png) | ![Effects](docs/screenshots/cc-effects-light.png) |
+| ![Workspaces](docs/screenshots/cc-workspaces-dark.png) | ![Workspaces](docs/screenshots/cc-workspaces-light.png) |
+| ![Colors](docs/screenshots/cc-colors-dark.png) | ![Colors](docs/screenshots/cc-colors-light.png) |
+| ![Plugins](docs/screenshots/cc-plugins-dark.png) | ![Plugins](docs/screenshots/cc-plugins-light.png) |
+| ![Setup](docs/screenshots/cc-shells-dark.png) | ![Setup](docs/screenshots/cc-shells-light.png) |
 
-The bar itself, top edge, flush against the screen:
+## The bundled theme
 
-![The bar](docs/screenshots/bar-hero.png)
-
-The menu, the workspaces (here drawn as watching eyes), the centre with the seal, the indicators, the tray and
-media:
-
-![Menu and workspaces](docs/screenshots/menu-workspaces.png)
-
-![Centre cluster](docs/screenshots/center-cluster.png)
-
-![Indicators](docs/screenshots/indicators.png)
-
-![Tray and media](docs/screenshots/tray-media.png)
-
-## The Tomie theme
-
-IKAI is the shell; **Tomie** is the colour theme it is being drawn against, based on *Tomie* by Junji Ito. It is a
-**work in progress** and is not published on its own yet. What is in this repository, and what you see in the captures, are
-early ideas meant to give an impression of where it is going:
-
-- **Palette and surfaces**: bone on ink with one live blood red, for the bar, popups, notifications, launcher, lock and the
-  rest of Omarchy's shell (`themes/ito-verse/palette.toml`, `colors.toml`, `shell.toml`).
-- **Wallpaper**: one Tomie collage, `themes/ito-verse/backgrounds/tomie.png`, the one used in the captures. It is the only
-  wallpaper included; the rest of the set is not ready and is not published.
-- **Cursor**: the IKAI cursor theme (an arrow with a dark backing so it reads on any page, and the Uzumaki spiral as
-  the busy cursor): `python3 scripts/gen-cursors.py`.
-- **Icons**: an inked icon theme for file managers, in the same hand as the bar's icons:
-  `python3 scripts/gen-icons.py --install`.
-- **GTK**: a stylesheet for GTK apps (`themes/ito-verse/gtk.css`).
-
-When the theme is finished it will be published on its own, with everything above complete. The link goes here:
-
-> **Tomie theme on the Omarchy Market:** *coming soon*
-
-Until then, `omarchy theme set ito-verse` (Quick start, step 1) applies the early version that ships in this repository.
-The bar does not depend on it: it follows whichever Omarchy theme is installed.
+`themes/ito-verse` is an optional, unfinished colour theme (bone on ink with one blood red) that ships in this repository
+for people who want it; the bar does not depend on it and none of the captures above use it. Apply it with
+`omarchy theme set ito-verse`. The cursor and icon generators (`scripts/gen-cursors.py`, `scripts/gen-icons.py --install`)
+work with any theme.
 
 ## Quick start
 

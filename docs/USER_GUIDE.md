@@ -42,7 +42,7 @@ and **Lore**.
 
 ## Bars
 
-![Bars](screenshots/cc-bars.png)
+![Bars](screenshots/cc-bars-dark.png)
 
 The shape of the bar.
 
@@ -102,7 +102,7 @@ the popup emblems move while the popup is open. Follows **Effects → Motion**. 
 
 ## Icons
 
-![Icons](screenshots/cc-icons.png)
+![Icons](screenshots/cc-widgets-dark.png)
 
 Which widgets are on the bar, where, and how they read.
 
@@ -165,7 +165,7 @@ is open: `2026-12-08 Founders' day` marks one date, `12-25 Christmas` marks that
 
 ## Logo
 
-![Logo](screenshots/cc-logo.png)
+![Logo](screenshots/cc-logo-dark.png)
 
 The seal in the middle of the bar, what stands beside it, and the menu button.
 
@@ -186,7 +186,7 @@ and format. A file that is too heavy or not a picture is refused with a sentence
 
 ## Effects
 
-![Effects](screenshots/cc-effects.png)
+![Effects](screenshots/cc-effects-dark.png)
 
 How the shell moves and how much light it gives off. The cards run their effect live.
 
@@ -203,7 +203,7 @@ How the shell moves and how much light it gives off. The cards run their effect 
 
 ## Workspaces
 
-![Workspaces](screenshots/cc-workspaces.png)
+![Workspaces](screenshots/cc-workspaces-dark.png)
 
 - **Style.** Each card shows the family; among them Rings, Eyes and lips, Remina, three Uzumaki sets, Marks, Halo, Flauros,
   Tomie, Beetle and Uzumaki Eye, or **Custom**. Some Silent Hill families need pictures only you have (see
@@ -217,7 +217,7 @@ How the shell moves and how much light it gives off. The cards run their effect 
 
 ## Colors
 
-![Colors](screenshots/cc-colors.png)
+![Colors](screenshots/cc-colors-dark.png)
 
 - **Palette.** *Follow theme* takes the colours of the installed Omarchy theme and changes with it (the default);
   *IKAI* is the shell's own palette (bone on ink, blood the one live colour) and does not change with the theme.
@@ -227,7 +227,7 @@ How the shell moves and how much light it gives off. The cards run their effect 
 
 ## Plugins
 
-![Plugins](screenshots/cc-plugins.png)
+![Plugins](screenshots/cc-plugins-dark.png)
 
 Every plugin the shell can find, wherever it came from: IKAI, Omarchy, Shibumi, or anyone's. Filter with
 *IKAI*, *Others*, *All widgets*, *Everything*.
@@ -239,7 +239,7 @@ Every plugin the shell can find, wherever it came from: IKAI, Omarchy, Shibumi, 
 
 ## Setup
 
-![Setup](screenshots/cc-setup.png)
+![Setup](screenshots/cc-shells-dark.png)
 
 - **Profiles.** One place for every whole-bar look, whether it is one of the seven ready-made arrangements (Classic,
   Cluster, Compact, Floating dock, Monitor, Minimal, Zen — used to live on the Bars page as "Designs") or one you save
@@ -273,7 +273,6 @@ Your pictures are copied into `~/.config/ito/` and never leave your machine; see
 
 ## Health
 
-![Health](screenshots/cc-health.png)
 
 What is wrong with the shell, why, and how to put it right.
 

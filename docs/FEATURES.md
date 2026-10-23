@@ -118,7 +118,6 @@ the bar edge (`anchorAlong`) so the opening starts from the icon. A debug flag, 
 An unknown `frameStyle` resolves to Panel. `frameArt` chooses the art of Panel, Chains and Otherworld: `png` (pictures made once,
 default) or `drawn` (procedural). The frame cracks and the border reddens when a popup reports a problem (alert).
 
-![The five frame styles, normal row and alert row](screenshots/frames.png)
 
 **Opening animation** (Styles page, OPENING; `presenceReveal`): `none` (default), `spiral`, `blot`, `static`, `lid` (eyelids).
 Related switches: `presence` (the sheet of paper that grows out of the icon and folds back), `presenceShoulders`, `presenceSwitch`
@@ -165,7 +164,6 @@ The tooltip shows the track title.
 second only while the popup is open and something plays. The cover is pulled toward grey so any cover sits in the bar's world; with
 no cover a spiral is drawn. A horizontal swipe on the card skips to the previous or next track.
 
-![The media player popup](screenshots/popup-player.png)
 
 **Effect behind the buttons** (`mediaFx`, Effects page, MEDIA; `ItoMediaFx.qml`): `blood` (default), `spiral`, `radio`, `fog`,
 `static`, `custom`. It runs only while a track plays and leaps when the track changes. `custom` is your own picture or GIF
