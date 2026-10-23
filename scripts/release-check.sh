@@ -85,7 +85,7 @@ tr="$(git ls-files | grep -E '^(dev|openspec|\.atl)(/|$)|^CLAUDE\.md$' || true)"
 st="$(grep -E '(^|/)__pycache__/|\.pyc$|\.bak|~$|\.swp$|\.lock$|\.orig$|\.rej$|\.DS_Store$|\.log$' "$TMP/all" || true)"
 [ -z "$st" ] && ok "4c stray files" "no pycache / bak / lock / log in the publish set" || { bad "4c stray files" ""; printf '%s\n' "$st" | show; }
 # root entries: only known names; anything else is probably a stray file (for example a mis-redirected command output).
-KNOWN='^(\.gitignore|ART_LICENSE\.md|BarWidget\.qml|CHANGELOG\.md|CONTRIBUTING\.md|LICENSE|NOTICE|README\.md|THIRD_PARTY_NOTICES\.md|install\.sh|manifest\.json|preview\.jpg|assets|bar|compat|docs|icons|plugins|scripts|seed|skills|themes)$'
+KNOWN='^(\.gitignore|\.github|SECURITY\.md|CODE_OF_CONDUCT\.md|ART_LICENSE\.md|BarWidget\.qml|CHANGELOG\.md|CONTRIBUTING\.md|LICENSE|NOTICE|README\.md|THIRD_PARTY_NOTICES\.md|install\.sh|manifest\.json|preview\.jpg|assets|bar|compat|docs|icons|plugins|scripts|seed|skills|themes)$'
 rootx="$(cut -d/ -f1 "$TMP/all" | sort -u | grep -vE "$KNOWN" || true)"
 [ -z "$rootx" ] && ok "4d root entries" "all known" || { bad "4d root entries" "unknown, stray?:"; printf '%s\n' "$rootx" | show; }
 sz="$(xargs -d '\n' du -cb < "$TMP/all" | tail -1 | cut -f1)"

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: IKAI runs scripts on your machine (a bar, lock and boot tooling). In scope: anything that runs commands unexpectedly, writes outside its own folders, or leaks local data. boot changes need a terminal and are never run silently.
+    about: Ask for help or share ideas in Discussions before opening an issue.

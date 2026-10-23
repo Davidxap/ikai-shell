@@ -1,0 +1,40 @@
+name: Bug report
+description: Something is broken or looks wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please check the existing issues first. Do not paste personal data (screenshots of your whole screen, tokens, paths with your username).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. ...\n2. ...\n3. ..."
+    validations:
+      required: true
+  - type: input
+    id: omarchy
+    attributes:
+      label: Omarchy version and theme
+      placeholder: "omarchy-version output, theme name (dark or light)"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Bar, Control Center, Workspaces, Popups, Icons or logo art, Lock or Boot, Install or update, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Crop screenshots to the affected area.
