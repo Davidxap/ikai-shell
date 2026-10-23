@@ -9,6 +9,11 @@ presets and saved setups, the Health page and `ito-compat`. Requires Omarchy 4.0
 
 ## Development log (before the first release)
 
+### Light-theme art, new captures, no cursor theme (2026-10-22)
+- The theme shader now keeps linework solid on light plates (clean paper instead of a grey veil, near-black ink) without crushing tone art such as Pyramid Head or Heather; dark themes are unchanged.
+- All captures and the tour were redone on Sakura Mochi (dark) and Woman with Floral Composition (light); the root `preview.jpg` is a collage of both.
+- The cursor theme (`scripts/gen-cursors.py`, `assets/native/cursor/`, `ito-art/cursor/`) and its Health check were removed; a new one will be designed later.
+
 ### Popup emblems follow the current icons (2026-10-22)
 
 The emblem at the head of every popup is now the widget's current bar icon (`ItoEmblemMap.js`, drawn by `ItoImage` in the style chosen for that widget), not an older drawing; the clock keeps its drawn sign. Doc shots `popup-emblems`, `popup-player`, `popup-forecast` re-rendered.

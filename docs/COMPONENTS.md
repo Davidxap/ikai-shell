@@ -75,8 +75,7 @@ popup opens, and would silently discard anything written to it). Read and write 
 
 `bar/modules/ito-art/` is what the running bar actually reads (see `docs/ICON_SPEC.md` for the exact
 files and sizes). Most icons in `ito-art/` are drawn directly by the generators in `scripts/`
-(`gen-engraved.py`, `gen-hardware.py`, `gen-decor.py`, ...). The only art kept outside it is
-`assets/native/cursor/`, the source of the mouse cursor theme (`scripts/gen-cursors.py`).
+(`gen-engraved.py`, `gen-hardware.py`, `gen-decor.py`, ...).
 
 ## Tools (`scripts/`, `bar/modules/bin/`)
 
@@ -92,9 +91,9 @@ See the README's "Everyday tools" table for the tools meant to be run directly
 | `sync.sh` | The lower-level `pull` / `push` / `status` rsync deploy.sh wraps. |
 | `shell-switch` | Detects every installed shell and switches to one cleanly (stop → save → swap → start → verify). |
 | `gen-palette.py` | Generates `colors.toml` / `shell.toml` from `palette.toml`, validating contrast. |
-| `gen-engraved.py`, `gen-hardware.py`, `gen-decor.py`, `gen-marks.py`, `gen-tomie-icons.py`, `gen-indicator-icons.py`, `gen-cursors.py`, `gen-gtk.py` | Icon/cursor/GTK-theme generators; each is its own icon family. |
+| `gen-engraved.py`, `gen-hardware.py`, `gen-decor.py`, `gen-marks.py`, `gen-tomie-icons.py`, `gen-indicator-icons.py`, `gen-gtk.py` | Icon/GTK-theme generators; each is its own icon family. |
 | `gen-itobar-marker.py` | Writes the bar engine's suite-marker signature. |
-| `gen-assets.py` | The tint helper `gen-cursors.py` uses to recolour the cursor art. |
+| `gen-assets.py` | The tint helper the generators use to recolour art to a palette. |
 | `lab/lore-sheets.sh` | Renders the three lore sheets (CPU, memory, storage; four palettes, idle to critical, subtle and full) to `/tmp/ito-lab/` on fake data and prints any budget or clearance failure. |
 | `lab/` | Renders QML scenes off-screen, for iterating on an icon or effect without a live bar. |
 

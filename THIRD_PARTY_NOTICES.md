@@ -34,7 +34,7 @@ by Omarchy.
 
 ## Images
 
-Some source images (a design sheet that is not included here, and the pieces cut from it that live in `assets/native/cursor/` and
+Some source images (a design sheet that is not included here, and the pieces cut from it that live in
 `bar/modules/ito-art/`) were found online and edited. The Tomie wallpaper in `themes/ito-verse/backgrounds/` is the one image of
 the work-in-progress Tomie theme that is published. They remain the property
 of their authors, and `ART_LICENSE.md` explains the terms and how to ask for credit or removal. Everything drawn by the scripts

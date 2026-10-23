@@ -35,8 +35,18 @@ void main() {
     float baseLum = dot(baseFg.rgb, vec3(0.299, 0.587, 0.114));
     float red = smoothstep(0.12, 0.42, rgb.r - max(rgb.g, rgb.b));
 
-    vec3 bone = mix(bg.rgb, fg.rgb, clamp(lum / baseLum, 0.0, 1.25));
-    vec3 blood = mix(bg.rgb, accent.rgb, clamp(rgb.r / max(baseAccent.r, 0.05), 0.0, 1.25));
+    float t = clamp(lum / baseLum, 0.0, 1.25);
+    float r = clamp(rgb.r / max(baseAccent.r, 0.05), 0.0, 1.25);
+    // On a light plate the linework is dark ink: the mid tones of the hatching and the antialiasing would read as
+    // washed-out grey, so the line is made solid, while the faint tones of the plate (grain, mosaic, glass) fall to clean
+    // paper instead of a grey veil. A dark plate keeps the plain ramp.
+    float light = step(dot(fg.rgb, vec3(0.299, 0.587, 0.114)) + 0.15, dot(bg.rgb, vec3(0.299, 0.587, 0.114)));
+    t = mix(t, mix(t, smoothstep(0.09, 0.95, t), 0.55), light);
+    r = mix(r, mix(r, smoothstep(0.09, 0.95, r), 0.55), light);
+
+    vec3 ink = mix(fg.rgb, vec3(0.04, 0.05, 0.07), 0.3 * light);   // a light plate gets near-black linework
+    vec3 bone = mix(bg.rgb, ink, t);
+    vec3 blood = mix(bg.rgb, accent.rgb, r);
     vec3 outRgb = clamp(mix(bone, blood, red), 0.0, 1.0);
     fragColor = vec4(outRgb * c.a, c.a) * qt_Opacity;
 }

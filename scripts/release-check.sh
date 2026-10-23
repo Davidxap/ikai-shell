@@ -45,7 +45,7 @@ fi
 
 # (1c) the third-party art ART_LICENSE.md names is still named there.
 miss=""
-for k in "ito-art" "assets/native/cursor" "themes/ito-verse/backgrounds" "Lunar_enchantress"; do grep -q "$k" ART_LICENSE.md || miss="$miss $k"; done
+for k in "ito-art" "themes/ito-verse/backgrounds" "Lunar_enchantress"; do grep -q "$k" ART_LICENSE.md || miss="$miss $k"; done
 [ -z "$miss" ] && ok "1c art licence coverage" "ART_LICENSE.md names the art folders and the Tomie source" || bad "1c art licence coverage" "ART_LICENSE.md lacks:$miss"
 for f in $(grep -oE '`[^` ]+`' ART_LICENSE.md | tr -d '`' | grep -E '^(bar|themes|assets|icons|docs|preview)' | sed 's#/$##' | sort -u); do
   [ -e "$f" ] || bad "1c art licence paths" "ART_LICENSE.md names a path that does not exist: $f"
@@ -85,7 +85,7 @@ tr="$(git ls-files | grep -E '^(dev|openspec|\.atl)(/|$)|^CLAUDE\.md$' || true)"
 st="$(grep -E '(^|/)__pycache__/|\.pyc$|\.bak|~$|\.swp$|\.lock$|\.orig$|\.rej$|\.DS_Store$|\.log$' "$TMP/all" || true)"
 [ -z "$st" ] && ok "4c stray files" "no pycache / bak / lock / log in the publish set" || { bad "4c stray files" ""; printf '%s\n' "$st" | show; }
 # root entries: only known names; anything else is probably a stray file (for example a mis-redirected command output).
-KNOWN='^(\.gitignore|ART_LICENSE\.md|BarWidget\.qml|CHANGELOG\.md|CONTRIBUTING\.md|LICENSE|NOTICE|README\.md|THIRD_PARTY_NOTICES\.md|install\.sh|manifest\.json|preview\.png|assets|bar|compat|docs|icons|plugins|scripts|seed|skills|themes)$'
+KNOWN='^(\.gitignore|ART_LICENSE\.md|BarWidget\.qml|CHANGELOG\.md|CONTRIBUTING\.md|LICENSE|NOTICE|README\.md|THIRD_PARTY_NOTICES\.md|install\.sh|manifest\.json|preview\.jpg|assets|bar|compat|docs|icons|plugins|scripts|seed|skills|themes)$'
 rootx="$(cut -d/ -f1 "$TMP/all" | sort -u | grep -vE "$KNOWN" || true)"
 [ -z "$rootx" ] && ok "4d root entries" "all known" || { bad "4d root entries" "unknown, stray?:"; printf '%s\n' "$rootx" | show; }
 sz="$(xargs -d '\n' du -cb < "$TMP/all" | tail -1 | cut -f1)"

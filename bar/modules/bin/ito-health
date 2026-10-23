@@ -271,9 +271,6 @@ def all_checks():
                      "The IKAI icon theme is installed for Nautilus and other GTK apps.", "The IKAI icon theme is not installed.",
                      why="File managers and GTK apps keep their own icons; the themed set is unused.",
                      fix="Run scripts/gen-icons.py --install from the repository.", level="warn"))
-    out.append(check("cursor", "Cursor theme", (HOME / ".local/share/icons/Ito-verse/cursors").exists(),
-                     "The IKAI cursor theme is installed.", "The IKAI cursor theme is not installed.",
-                     why="The pointer stays the system's.", fix="Run scripts/gen-cursors.py --install.", level="warn"))
 
     colors = HOME / ".local/state/omarchy/current/theme/colors.toml"
     out.append(check("colours", "Theme colours", colors.exists(),

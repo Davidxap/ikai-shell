@@ -8,7 +8,7 @@ The other world, one bar tall.
 with a bar of its own, drawn as fine engravings instead of flat vector icons, and gives you a Control Centre to change
 nearly everything without touching a file.
 
-![IKAI: the bar](docs/screenshots/bar-dark.png)
+![IKAI on a dark and a light Omarchy theme: the bar, the workspaces page and the logo page](docs/screenshots/preview.jpg)
 
 > **Status: beta.** This is the first version meant to be installed and used. It has been swept option by option
 > and reviewed, but it is young: if anything looks wrong, open the Control Centre → **Health**, press
@@ -97,57 +97,25 @@ The longer story, the migration note and the credits are in [docs/ABOUT.md](docs
 | **Health and compat** | A Health page with Fix buttons and an AI-readable report; `ito-compat` checks every Omarchy, Quickshell and Qt dependency after an update. |
 | **Upgrade safety** | One safe restart path (`ito-restart`), backups before each apply, reverts for lock, boot, fastfetch and settings. See [docs/UPGRADING.md](docs/UPGRADING.md). |
 
-## Popups and their emblems
-
-Full tour of every feature: [docs/FEATURES.md](docs/FEATURES.md).
-
-Each popup carries a small sign at its head, in the theme's colours: the widget's current icon, the same drawing and style the bar uses (Original, Ink or Relic, per widget). The calendar keeps its drawn clock. The accent is the installed theme's; the ink and bone follow its background and foreground, so the same popup turns dark or light with the theme.
-
-| Sakura Mochi (dark) | Woman with Floral Composition (light) |
-|---|---|
-| ![The calendar on a dark theme](docs/screenshots/popup-calendar-dark.png) | ![The calendar on a light theme](docs/screenshots/popup-calendar-light.png) |
-
 ## Screenshots
 
-A short tour of the Control Center (animated: [docs/media/tour.mp4](docs/media/tour.mp4)):
+Short tour of the Control Center (video: [docs/media/tour.mp4](docs/media/tour.mp4)):
 
 ![Control Center tour](docs/media/tour.gif)
 
-The bar, top edge, flush against the screen (each island cut out):
-
-![The bar, dark](docs/screenshots/bar-dark.png)
-
-![The bar, light](docs/screenshots/bar-light.png)
-
-The menu and workspaces, the centre with the seal, the indicators, and the tray with media (dark on the left, light on the right):
-
-| Dark | Light |
+| Dark (Sakura Mochi) | Light (Woman with Floral Composition) |
 |---|---|
-| ![Menu and workspaces](docs/screenshots/menu-workspaces-dark.png) | ![Menu and workspaces](docs/screenshots/menu-workspaces-light.png) |
-| ![Centre cluster](docs/screenshots/center-cluster-dark.png) | ![Centre cluster](docs/screenshots/center-cluster-light.png) |
-| ![Indicators](docs/screenshots/indicators-dark.png) | ![Indicators](docs/screenshots/indicators-light.png) |
-| ![Tray and media](docs/screenshots/tray-media-dark.png) | ![Tray and media](docs/screenshots/tray-media-light.png) |
+| ![Calendar popup, dark](docs/screenshots/popup-calendar-dark.png) | ![Calendar popup, light](docs/screenshots/popup-calendar-light.png) |
 
-### Control Center
-
-| Dark | Light |
-|---|---|
-| ![Styles](docs/screenshots/cc-styles-dark.png) | ![Styles](docs/screenshots/cc-styles-light.png) |
-| ![Bars](docs/screenshots/cc-bars-dark.png) | ![Bars](docs/screenshots/cc-bars-light.png) |
-| ![Icons](docs/screenshots/cc-widgets-dark.png) | ![Icons](docs/screenshots/cc-widgets-light.png) |
-| ![Logo](docs/screenshots/cc-logo-dark.png) | ![Logo](docs/screenshots/cc-logo-light.png) |
-| ![Effects](docs/screenshots/cc-effects-dark.png) | ![Effects](docs/screenshots/cc-effects-light.png) |
-| ![Workspaces](docs/screenshots/cc-workspaces-dark.png) | ![Workspaces](docs/screenshots/cc-workspaces-light.png) |
-| ![Colors](docs/screenshots/cc-colors-dark.png) | ![Colors](docs/screenshots/cc-colors-light.png) |
-| ![Plugins](docs/screenshots/cc-plugins-dark.png) | ![Plugins](docs/screenshots/cc-plugins-light.png) |
-| ![Setup](docs/screenshots/cc-shells-dark.png) | ![Setup](docs/screenshots/cc-shells-light.png) |
+Every popup carries a small sign at its head, in the theme's colours: the widget's current icon, drawn in the bar's style.
+More captures, bar sections and every Control Center page, dark and light: [docs/GALLERY.md](docs/GALLERY.md).
 
 ## The bundled theme
 
 `themes/ito-verse` is an optional, unfinished colour theme (bone on ink with one blood red) that ships in this repository
 for people who want it; the bar does not depend on it and none of the captures above use it. Apply it with
-`omarchy theme set ito-verse`. The cursor and icon generators (`scripts/gen-cursors.py`, `scripts/gen-icons.py --install`)
-work with any theme.
+`omarchy theme set ito-verse`. The icon generator (`scripts/gen-icons.py --install`)
+works with any theme.
 
 ## Quick start
 
@@ -266,7 +234,7 @@ The full list, with licences, is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES
   media effects, custom pictures and GIFs, saved setups, the Health page and its report, `ito-host` and the tools.
 - **Inspired by** Junji Ito's manga (*Uzumaki*, *Tomie*, *Gyo*, *Amigara Fault*) and by the Silent Hill games.
   This is a fan work; it is not affiliated with or endorsed by their authors or publishers.
-- **Some source images were found online and edited** (the art in `assets/native/cursor/` and `bar/modules/ito-art/` that was cut from a
+- **Some source images were found online and edited** (the art in `bar/modules/ito-art/` that was cut from a
   design sheet, which is not included here). They stay the
   property of their authors; see [ART_LICENSE.md](ART_LICENSE.md). Rights holders can ask for credit or removal.
 

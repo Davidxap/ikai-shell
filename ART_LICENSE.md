@@ -3,7 +3,7 @@
 Copyright (c) 2026 davidxap (https://github.com/Davidxap), for the original work in it; see below for what is not.
 
 This covers everything under `bar/modules/ito-art/`, `themes/ito-verse/backgrounds/`,
-`docs/screenshots/`, `assets/native/cursor/`, and `icons/` — every drawing, icon, wallpaper and cursor
+`docs/screenshots/`, and `icons/` — every drawing, icon and wallpaper
 in this repository. It is separate from `LICENSE`, which covers the code (PolyForm Noncommercial 1.0.0). Both forbid commercial use.
 
 ## What this is
@@ -18,8 +18,8 @@ any of them.
 
 ## Where the images come from, plainly
 
-Some of the source images (a design sheet, not included in this repository, and the pieces cut from it that live in `assets/native/cursor/`
-and `bar/modules/ito-art/`) are images found
+Some of the source images (a design sheet, not included in this repository, and the pieces cut from it that live in
+`bar/modules/ito-art/`) are images found
 on the internet that the maintainer then edited. They were **not** drawn for this project, and this licence does not
 give anyone rights over them: whatever rights their original authors hold stay with those authors. The icons drawn
 by the scripts in `scripts/` (the engraved set, the marks, the decorations, the workspace styles) are original work.

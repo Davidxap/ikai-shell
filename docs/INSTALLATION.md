@@ -70,17 +70,16 @@ scripts/shell-switch ito
 swaps cleanly (stop → save → swap → start → verify, rolling back automatically if the new shell
 fails to come up). Run it with no argument to list what it found.
 
-### Optional: the cursor and the icons
+### Optional: the icons
 
-The Tomie colour theme (step 1) does not select a cursor or icon theme by itself. To build and install them:
+The Tomie colour theme (step 1) does not select an icon theme by itself. To build and install it:
 
 ```bash
-python3 scripts/gen-cursors.py            # the IKAI cursor theme, into ~/.local/share/icons/Ito-verse (folder name unchanged)
 python3 scripts/gen-icons.py --install    # the inked IKAI icon theme, into ~/.local/share/icons/Ito-verse-icons (folder name unchanged)
 ```
 
-Installing them changes nothing until something selects them (your desktop's cursor and icon settings).
-`ito-health` reports whether they are installed.
+Installing it changes nothing until something selects it (your desktop's icon settings).
+`ito-health` reports whether it is installed.
 
 ## Updating
 
@@ -147,8 +146,8 @@ rm -rf ~/.config/ito ~/.cache/ito          # only if you also want your own art,
 ```
 
 Switch shells and revert the colour theme **before** deleting any files: `shell-switch` needs the files present to shut the
-shell down cleanly. The cursor and icon themes (`~/.local/share/icons/Ito-verse*`) are not selected by anything until you pick
-them; remove the folders if you installed them.
+shell down cleanly. The icon theme (`~/.local/share/icons/Ito-verse-icons`) is not selected by anything until you pick
+it; remove the folder if you installed it.
 
 ## What "reversible" means here
 

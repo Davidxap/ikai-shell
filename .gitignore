@@ -46,8 +46,3 @@ bar/modules/ito-art/hollow/
 /scripts/itobar-backup.sh
 /scripts/gen-preview-sheet.py
 
-# old-brand images (read "Ito-verse"); cannot be re-rendered offscreen, kept local only
-/preview.png
-/docs/screenshots/desktop-control-center.jpg
-/docs/media/tour.gif
-/docs/media/tour.mp4
