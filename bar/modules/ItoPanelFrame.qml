@@ -177,8 +177,8 @@ Item {
   onAlertChanged: if (alert && opened && amp > 0 && on && styleKey === "otherworld") flash.restart()
   onMemoChanged: if (memos.length === 0) shownMemo = memo
 
-  // the emblem is the widget's current icon (ItoEmblemMap); "" for one with no bar icon (the clock), which keeps its drawn sign
-  readonly property string emblemArt: cfg ? EmblemMap.art(emblem, cfg.get("aiStyle", "brain")) : ""
+  // opt-in (popupEmblemIcon, off by default): the emblem is the widget's current icon (ItoEmblemMap); otherwise the drawn sign (the eye, the waves...) stays
+  readonly property string emblemArt: cfg && cfg.get("popupEmblemIcon", false) === true ? EmblemMap.art(emblem, cfg.get("aiStyle", "brain")) : ""
   readonly property bool realEye: emblem === "eye" && emblemArt === "" && !!cfg && (cfg.eyeFamily !== undefined ? cfg.eyeFamily : cfg.eyeStyle) === "shaded"
   // where the pointer is, in the emblem's coordinates (null when it is not over the head of the popup or the card): the real eye follows it. Only a moving
   // real eye asks (eyes-animation.md): for every other emblem and style this is null and nothing is mapped.

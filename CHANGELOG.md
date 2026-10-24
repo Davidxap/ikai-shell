@@ -9,6 +9,10 @@ presets and saved setups, the Health page and `ito-compat`. Requires Omarchy 4.0
 
 ## Development log (before the first release)
 
+### Popup eyes restored (2026-10-23)
+
+The popup heads draw their own signs again (the eye of Display, the waves, the rune...). Showing the widget icon instead is now opt-in (`popupEmblemIcon`, off by default).
+
 ### Light-theme art, new captures, no cursor theme (2026-10-22)
 - The theme shader now keeps linework solid on light plates (clean paper instead of a grey veil, near-black ink) without crushing tone art such as Pyramid Head or Heather; dark themes are unchanged.
 - All captures and the tour were redone on Sakura Mochi (dark) and Woman with Floral Composition (light); the root `preview.jpg` is a collage of both.
