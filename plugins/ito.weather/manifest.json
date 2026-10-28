@@ -3,7 +3,7 @@
   "id": "ito.weather",
   "name": "Ito Weather",
   "version": "0.1.0",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "MIT",
   "author": "davidxap",
   "homepage": "https://github.com/Davidxap/ikai-shell",
   "description": "The sky, inked: conditions now and for the days ahead.",

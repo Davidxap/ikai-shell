@@ -345,6 +345,6 @@ Values are validated against fixed lists; a bad value is refused. `ito-config de
 - **Media** works through MPRIS only; a player without MPRIS support does not appear. Cassette (recording) and Weathered cup (stay
   awake) exist only when built from your sprite sheet.
 - **Fastfetch `image` layout** needs a terminal with the kitty graphics protocol (use `text` elsewhere).
-- **Licence.** The licence is PolyForm Noncommercial for the IKAI code, so GitHub detects it as "Other" and it is not OSI open source;
-  the bar engine fork stays MIT (HANCORE). See [NOTICE](../NOTICE) and the README.
+- **Licence.** The licence is MIT for the IKAI code (the art has its own terms in `ART_LICENSE.md`);
+  the bar engine fork keeps its MIT notice (HANCORE). See [NOTICE](../NOTICE) and the README.
 - **Beta.** 0.2.0-beta is the first release under the IKAI name.

@@ -1,14 +1,14 @@
 IKAI -- licences by part
 
-  Code (qml, js, py, shell)      PolyForm Noncommercial License 1.0.0      LICENSE
+  Code (qml, js, py, shell)      MIT License                               LICENSE
   plugins/ito.bar, ito.state     MIT (a fork of Shibumi-Shell, (c) HANCORE) plugins/ito.bar/LICENSE
   plugins/ito.audio, network,    MIT (re-skinned copies of Omarchy's widgets, (c) David Heinemeier Hansson)
     bluetooth, power, display                                              each folder's LICENSE
   Art (icons, marks, wallpapers) Personal, non-commercial use only          ART_LICENSE.md
 
-Required Notice: Copyright (c) 2026 davidxap (https://github.com/Davidxap)
-Required Notice: plugins/ito.audio, ito.network, ito.bluetooth, ito.power and ito.display are re-skinned from Omarchy's widgets, Copyright (c) David Heinemeier Hansson, MIT.
-Required Notice: plugins/ito.bar and plugins/ito.state are forked from Shibumi-Shell, Copyright (c) 2026 HANCORE, MIT.
+Copyright (c) 2026 davidxap (https://github.com/Davidxap), MIT. Versions published before the move to MIT were offered under PolyForm Noncommercial 1.0.0; this does not take away what anyone received under those terms.
+Attribution: plugins/ito.audio, ito.network, ito.bluetooth, ito.power and ito.display are re-skinned from Omarchy's widgets, Copyright (c) David Heinemeier Hansson, MIT.
+Attribution: plugins/ito.bar and plugins/ito.state are forked from Shibumi-Shell, Copyright (c) 2026 HANCORE, MIT.
 
 Not affiliated with or endorsed by Junji Ito, his publishers, Konami, HANCORE or any other rights holder.
 Third-party plugins that the shell can host keep their own licences.

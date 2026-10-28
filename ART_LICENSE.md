@@ -4,7 +4,7 @@ Copyright (c) 2026 davidxap (https://github.com/Davidxap), for the original work
 
 This covers everything under `bar/modules/ito-art/`, `themes/ito-verse/backgrounds/`,
 `docs/screenshots/`, and `icons/` — every drawing, icon and wallpaper
-in this repository. It is separate from `LICENSE`, which covers the code (PolyForm Noncommercial 1.0.0). Both forbid commercial use.
+in this repository. It is separate from `LICENSE`, which covers the code (MIT). The terms below apply to the art only.
 
 ## What this is
 

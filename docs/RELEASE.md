@@ -79,7 +79,7 @@ gh release create v0.2.0-beta --repo Davidxap/ikai-shell --prerelease --title "I
 ```
 
 Then, on GitHub, check **Settings → Features** (issues on), the topics (`omarchy`, `quickshell`, `hyprland`), and that the
-licence is detected as PolyForm Noncommercial.
+licence is detected as MIT.
 
 ## 5. Archive the legacy repository, with a pointer
 
@@ -99,7 +99,7 @@ Comment on issue #8573 (check the repository that issue lives in before posting)
 
 > IKAI (formerly "Ito-verse Shell") is published at https://github.com/Davidxap/ikai-shell (prerelease v0.2.0-beta).
 > It is an Omarchy plugin: `omarchy plugin add https://github.com/Davidxap/ikai-shell`. Root manifest: `manifest.json`
-> (id `davidxap.ito-verse-shell`, kind `bar-widget`). Licence: PolyForm Noncommercial 1.0.0 for the code, a separate art
+> (id `davidxap.ito-verse-shell`, kind `bar-widget`). Licence: MIT for the code, a separate art
 > licence for the art, MIT for the forked bar engine and the five re-skinned Omarchy widgets. It needs Omarchy 4.0.6 or newer.
 > The old repository `Davidxap/ito-verse-shell` is archived and points here.
 

@@ -20,10 +20,10 @@ marketplace process. The only stated requirements are technical; the submission 
 | Item | Status |
 |---|---|
 | `omarchy-plugin-validate .` (root) | PASS (run from a clean clone: the local `CLAUDE.md` symlink is untracked and not published) |
-| Root manifest | id `davidxap.ito-verse-shell` (kept on purpose, renaming breaks saved layouts), name `IKAI`, version `0.2.0-beta`, kind `bar-widget`, entry `BarWidget.qml`, licence `PolyForm-Noncommercial-1.0.0`, author `davidxap` |
+| Root manifest | id `davidxap.ito-verse-shell` (kept on purpose, renaming breaks saved layouts), name `IKAI`, version `0.2.0-beta`, kind `bar-widget`, entry `BarWidget.qml`, licence `MIT`, author `davidxap` |
 | 25 `plugins/ito.*/manifest.json` | PASS (validate); each has id, version, licence (MIT for the forked engine and the five re-skinned widgets) and `homepage` |
 | Homepage URL | `https://github.com/Davidxap/ikai-shell` until step 2 of [RELEASE.md](RELEASE.md) points it at `ikai-shell` |
-| Licence | PolyForm Noncommercial 1.0.0 (code), [ART_LICENSE.md](../ART_LICENSE.md) (art), MIT (HANCORE engine, Omarchy widgets) |
+| Licence | MIT (code), [ART_LICENSE.md](../ART_LICENSE.md) (art), MIT (HANCORE engine, Omarchy widgets) |
 | Screenshots | `docs/screenshots/`; no personal data. The Control Centre captures are rendered offscreen with fake data under the IKAI name |
 | Version | `0.2.0-beta`, prerelease tag `v0.2.0-beta` |
 | Requirements stated | Omarchy 4.0.6 or newer |
@@ -59,7 +59,7 @@ marketplace process. The only stated requirements are technical; the submission 
 `docs/screenshots/cc-workspaces-dark.png`, `docs/screenshots/cc-logo-dark.png`, `docs/screenshots/popup-calendar-dark.png`,
 `docs/screenshots/cc-workspaces-light.png`, `docs/media/tour.gif`.
 
-**Licence note:** the code is PolyForm Noncommercial 1.0.0 (free for non-commercial use); the art is under a separate
+**Licence note:** the code is MIT; the art is under a separate
 personal, non-commercial art licence (`ART_LICENSE.md`). The bar engine (`plugins/ito.bar`, `plugins/ito.state`) is a fork of
 Shibumi-Shell by HANCORE (MIT), and five widgets are re-skinned from Omarchy's own (MIT, David Heinemeier Hansson). Fan work,
 not affiliated with Junji Ito, his publishers, Konami, HANCORE or Omarchy.

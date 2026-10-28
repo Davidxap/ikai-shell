@@ -2,7 +2,7 @@
 
 ## The engine decision
 
-IKAI runs its **own** bar engine, `ito.bar`/`ito.state` — an MIT-licensed fork of the Shibumi bar engine (the rest of IKAI is under PolyForm Noncommercial; see NOTICE)
+IKAI runs its **own** bar engine, `ito.bar`/`ito.state` — an MIT-licensed fork of the Shibumi bar engine (the rest of the IKAI code is MIT under its own copyright; see NOTICE)
 (`plugins/ito.bar/NOTICE`), registered as a style alongside Shibumi's own, not layered on top of it.
 
 This was a deliberate move away from Omarchy's stock bar engine, which has no style system at all

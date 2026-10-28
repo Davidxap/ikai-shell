@@ -573,7 +573,7 @@ ColumnLayout {
     host: page.cc
     pal: page.pal
     label: "ABOUT"
-    note: "IKAI 異界, made by davidxap. Formerly Ito-verse. Inspired by Junji Ito and Silent Hill; not affiliated with Junji Ito or Konami. The bar engine is a fork of Shibumi-Shell by HANCORE (MIT); five widgets are Omarchy's own, re-skinned. Free for non-commercial use: see LICENSE and NOTICE in the repository."
+    note: "IKAI 異界, made by davidxap. Formerly Ito-verse. Inspired by Junji Ito and Silent Hill; not affiliated with Junji Ito or Konami. The bar engine is a fork of Shibumi-Shell by HANCORE (MIT); five widgets are Omarchy's own, re-skinned. Code under the MIT licence, art under its own terms: see LICENSE, ART_LICENSE.md and NOTICE in the repository."
 
     Text {
       text: "github.com/Davidxap/ikai-shell"

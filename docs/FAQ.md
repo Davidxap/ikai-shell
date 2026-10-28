@@ -73,8 +73,8 @@ Health → **Copy report for an AI assistant**, and paste it into any assistant.
 machine and includes the log.
 
 **Is it free? Can I use it commercially?**
-It is free for any non-commercial use (PolyForm Noncommercial 1.0.0 for the code, personal non-commercial use for the art).
-You may not use it to make money. The forked bar engine and five re-skinned Omarchy widgets keep their MIT licences. See
+The code is MIT-licensed, so you may use it commercially; the art is personal, non-commercial use only (see
+[ART_LICENSE.md](../ART_LICENSE.md)). The forked bar engine and five re-skinned Omarchy widgets keep their own MIT notices. See
 [NOTICE](../NOTICE).
 
 **Who made it?**

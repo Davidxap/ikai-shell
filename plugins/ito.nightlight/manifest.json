@@ -3,7 +3,7 @@
   "id": "ito.nightlight",
   "name": "Ito Night Light",
   "version": "0.1.0",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "MIT",
   "author": "davidxap",
   "homepage": "https://github.com/Davidxap/ikai-shell",
   "description": "Night light as one icon of its own (the moon or the fog): click to warm the screen.",
