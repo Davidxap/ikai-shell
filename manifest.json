@@ -3,7 +3,7 @@
   "id": "davidxap.ito-verse-shell",
   "name": "IKAI",
   "version": "0.2.0-beta",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "MIT",
   "author": "davidxap",
   "homepage": "https://github.com/Davidxap/ikai-shell",
   "description": "IKAI (異界): a bar and Control Centre for Omarchy from the other world — fog, rust, ink and spirals, inspired by Junji Ito and Silent Hill.",

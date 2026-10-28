@@ -3,7 +3,7 @@
   "id": "ito.notifications",
   "name": "Ito Notifications",
   "version": "0.1.0",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "MIT",
   "author": "davidxap",
   "homepage": "https://github.com/Davidxap/ikai-shell",
   "description": "A bell that tells whether notifications are waiting or silenced. Click it to silence them.",

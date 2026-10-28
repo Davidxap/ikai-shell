@@ -3,7 +3,7 @@
   "id": "ito.awake",
   "name": "Ito Stay Awake",
   "version": "0.1.0",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "MIT",
   "author": "davidxap",
   "homepage": "https://github.com/Davidxap/ikai-shell",
   "description": "Stay awake as one icon of its own (a coffee cup, a radio or a flashlight): click to keep the screen on.",

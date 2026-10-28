@@ -3,7 +3,7 @@
   "id": "ito.media",
   "name": "Ito Media",
   "version": "0.1.0",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "MIT",
   "author": "davidxap",
   "homepage": "https://github.com/Davidxap/ikai-shell",
   "description": "Previous, play or pause, and next for whatever is playing, drawn as the sheet's rings.",

@@ -116,7 +116,7 @@ else ok "5b repo URLs" "$new point to Davidxap/ikai-shell, none to the legacy re
 lic=""; for f in LICENSE ART_LICENSE.md NOTICE THIRD_PARTY_NOTICES.md; do [ -s "$f" ] || lic="$lic $f"; done
 for p in bar state audio network bluetooth power display; do [ -s "plugins/ito.$p/LICENSE" ] || lic="$lic plugins/ito.$p/LICENSE"; done
 [ -z "$lic" ] && ok "6a licence files" "LICENSE, ART_LICENSE, NOTICE, THIRD_PARTY_NOTICES and the 7 MIT folders" || bad "6a licence files" "missing:$lic"
-grep -q 'PolyForm Noncommercial License 1.0.0' LICENSE && ok "6b code licence" "PolyForm Noncommercial 1.0.0" || bad "6b code licence" "LICENSE text not PolyForm Noncommercial"
+grep -q '^MIT License' LICENSE && ok "6b code licence" "MIT" || bad "6b code licence" "LICENSE text not MIT"
 oldn="$(grep -nE 'Ito[- ]verse( Shell)?' README.md LICENSE NOTICE ART_LICENSE.md THIRD_PARTY_NOTICES.md manifest.json 2>/dev/null | grep -vE 'formerly|began as|legacy|themes/ito-verse|ito-verse-shell|Ito-verse-icons|Ito-verse/|Ito-verse cursor' || true)"
 [ -z "$oldn" ] && ok "6c IKAI naming" "no legacy product name in README, licences, manifest" || { bad "6c IKAI naming" ""; printf '%s\n' "$oldn" | show; }
 for f in docs/INSTALLATION.md docs/UPGRADING.md docs/RELEASE.md; do [ -s "$f" ] || bad "6d docs present" "missing $f"; done

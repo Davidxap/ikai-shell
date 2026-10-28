@@ -3,7 +3,7 @@
   "id": "ito.tray",
   "name": "Ito Tray",
   "version": "0.1.0",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "MIT",
   "author": "davidxap",
   "homepage": "https://github.com/Davidxap/ikai-shell",
   "description": "System tray as bare glyphs: no tiles, a throb for apps that need attention.",

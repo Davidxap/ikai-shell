@@ -240,15 +240,14 @@ The full list, with licences, is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES
 
 ## Licence
 
-**Free to use, not to sell.** IKAI is source-available for non-commercial use: run it, change it, share it,
-learn from it, build on it, but do not use it to make money.
+**Open source code, restricted art.** The code of IKAI is MIT-licensed: run it, change it, share it, learn from it,
+build on it, including commercially. The art is under its own, stricter terms (see the table).
 
 | Part | Licence |
 |---|---|
-| The code | [PolyForm Noncommercial 1.0.0](LICENSE) |
+| The code | [MIT](LICENSE) |
 | The bar engine (`plugins/ito.bar`, `ito.state`), a fork of Shibumi-Shell | MIT, © HANCORE ([details](plugins/ito.bar/LICENSE)) |
 | Five widgets re-skinned from Omarchy's own (`ito.audio`, `network`, `bluetooth`, `power`, `display`) | MIT, © David Heinemeier Hansson (each folder's `LICENSE`) |
 | The art (icons, marks, wallpapers) | Personal, non-commercial use ([ART_LICENSE.md](ART_LICENSE.md)) |
 
-Because it forbids commercial use it is not "open source" in the OSI sense, which cannot; the source is open to
-read, use and change. See [NOTICE](NOTICE) for the full list.
+The art licence is separate from the code licence and does not allow commercial use. See [NOTICE](NOTICE) for the full list.

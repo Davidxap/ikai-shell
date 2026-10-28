@@ -57,4 +57,4 @@ subject to the following conditions:
 This folder is a fork of Shibumi-Shell (https://github.com/HANCORE-linux/Shibumi-Shell) by HANCORE, whose
 MIT licence is reproduced above. The IKAI changes made inside this folder (the ito.* namespace and the
 IKAI skin) stay under the same MIT licence, so the fork can keep being combined with the upstream engine.
-The rest of the repository is licensed differently: see the LICENSE at the root.
+The rest of the repository: see the LICENSE at the root (code, MIT) and ART_LICENSE.md (art).

@@ -3,7 +3,7 @@
   "id": "ito.clock",
   "name": "Ito Clock",
   "version": "0.1.0",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "MIT",
   "author": "davidxap",
   "homepage": "https://github.com/Davidxap/ikai-shell",
   "description": "The time as a serif numeral, with optional seconds, 12 h, date, kanji digits, moon and tick; opens the calendar. The full date is in the tooltip.",

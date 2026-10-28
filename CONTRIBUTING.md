@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for wanting to help. IKAI is a non-commercial fan project (see [LICENSE](LICENSE) and
+Thanks for wanting to help. IKAI is a fan project with MIT-licensed code (see [LICENSE](LICENSE) and
 [NOTICE](NOTICE)); by contributing you agree your contribution is offered under the same terms as the part you touch.
 
 ## Before anything

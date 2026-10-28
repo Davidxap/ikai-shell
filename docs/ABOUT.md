@@ -71,7 +71,7 @@ From the [CHANGELOG](../CHANGELOG.md), first IKAI release:
 
 ## Licences, short
 
-- Code: PolyForm Noncommercial 1.0.0 ([LICENSE](../LICENSE)).
+- Code: MIT ([LICENSE](../LICENSE)).
 - Bar engine (`ito.bar`, `ito.state`): MIT, (c) HANCORE. Five re-skinned widgets: MIT, (c) David Heinemeier Hansson.
 - Art (icons, marks, wallpapers): personal, non-commercial use ([ART_LICENSE.md](../ART_LICENSE.md)). It is fan art; do not
   present it as official Junji Ito or Silent Hill material.

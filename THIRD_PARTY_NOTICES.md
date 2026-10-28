@@ -9,7 +9,6 @@ each of them gets the credit they are owed. If something here is missing or wron
 |---|---|---|---|---|
 | [Shibumi-Shell](https://github.com/HANCORE-linux/Shibumi-Shell) | **HANCORE** | MIT | `plugins/ito.bar`, `plugins/ito.state` | The bar engine, forked: the layout engine, drag-and-drop, the two layouts (islands and screen-edge forms) and the saved state. About 91 % of the lines of `ito.bar` and 98 % of `ito.state` are still theirs. IKAI renamed it (`ito.*`), added its own visual style and made room for more widgets. The shapes of the bar (islands, pills, notch) also take aesthetic cues from Shibumi. Licence: `plugins/ito.bar/LICENSE`, `plugins/ito.state/LICENSE`. |
 | [Omarchy](https://github.com/basecamp/omarchy) | **David Heinemeier Hansson** and contributors | MIT | `plugins/ito.audio`, `ito.network`, `ito.bluetooth`, `ito.power`, `ito.display` | Five widgets whose panels and logic are Omarchy's own, re-skinned with new artwork and readings. Licence: the `LICENSE` file inside each of those folders. |
-| [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) | The PolyForm Project | (the licence text itself) | `LICENSE` | The licence IKAI's own code is offered under. |
 
 ## What IKAI needs at run time (not included)
 
